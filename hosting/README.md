@@ -58,7 +58,7 @@ security. MiniPC: unit utente desktop-commander.service con NoNewPrivileges.
 Nessun sudo nell'installer. DESKTOP_COMMANDER_DISABLE_TELEMETRY=1,
 DC_FLAG_URL=data:application/json,... e --no-onboarding sono opzioni native.
 NODE_DEBUG=net è diagnostica connessioni senza payload HTTP; disattivarla
-fuori dalla finestra di accettazione. Non è un firewall contro comandi
+fuori dalla finestra di accettazione. Non è un firewall per bloccare comandi
 espliciti dell'owner.
 
 ## Build e proiezione
@@ -113,7 +113,7 @@ python3 -m unittest discover -s hosting -p 'test_*.py' -v
 
 ## Gesto owner e prova reale
 
-In ChatGPT Plugins → Add custom MCP server, nome Computer MCP, Connection
+In ChatGPT Plugins → Add custom MCP server, etichetta Computer MCP, Connection
 Tunnel, ID dedicato sopra, autenticazione «OAuth o nessuna autenticazione».
 Confermare il rischio e premere Crea. Nessuna password o pagina esterna.
 Fare discovery soltanto mentre il client è ready: /health/mcp deve osservare
