@@ -24,7 +24,7 @@ def prepare(output, source=None):
     before = hashlib.sha256(source.read_bytes()).hexdigest()
     writer = native_writer()
     catalog = writer.read_ciphertext_catalog(source)
-    for name in ['DESKTOP_COMMANDER_API_TOKEN', 'DESKTOP_COMMANDER_OAUTH_PASSWORD']:
+    for name in ['DESKTOP_COMMANDER_API_TOKEN']:
         catalog.setdefault(name, secrets.token_urlsafe(32))
     writer.write_ciphertext(catalog, output)
     if hashlib.sha256(source.read_bytes()).hexdigest() != before:

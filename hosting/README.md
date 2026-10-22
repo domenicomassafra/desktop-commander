@@ -1,129 +1,131 @@
 # Desktop Commander: hosting owner (#477)
 
-## Decisione e provenienza — 22 ottobre 2026
+## Decisione e provenienza — 23 ottobre 2026
 
-Il fork GitHub deriva direttamente da wonderwhy-er/DesktopCommanderMCP,
-MIT, commit f5c86e56e5192b25c7d8de9ed8109873385912ef (release v0.3.1).
-Nessuna modifica a src/, strumenti o autenticazione upstream.
-Il workflow owner-upstream-sync aggiorna giornalmente main con merge standard;
-conflitti o test falliti impediscono il push, mai force. Gli aggiornamenti
-vanno nuovamente provati prima di proiettare una release sui computer.
+Il fork GitHub deriva da wonderwhy-er/DesktopCommanderMCP, MIT, commit
+f5c86e56e5192b25c7d8de9ed8109873385912ef (v0.3.1). Nessuna modifica a
+src/, strumenti o autenticazione upstream. Il workflow owner-upstream-sync
+aggiorna ogni giorno main con merge standard: conflitti o test falliti
+impediscono il push, mai force. Provare gli aggiornamenti prima del deploy.
+
+Riusi, senza server o autenticazione scritti da noi:
+
+- ni-c/mcp-hub 0.11.6, MIT, e184c4e33de950e0b3f0d66bc8e7161acb905c2b:
+  aggregazione **stdio nativa**, nessun listener e nessun authorization server.
+  https://mcp-hub.ni-c.de/reference/environment#in-stdio-mode
+- supercorp-ai/supergateway 4.2.0, MIT,
+  2b7504bbb63634f2aeb5083461bd8c9ff0d9a2c8: stdio → HTTP autenticato
+  solo su Tailscale Studio. Binario darwin-arm64 verificato con SHA256SUMS
+  e gh attestation verify (exit 0).
+- openai/tunnel-client 0.0.17, Apache-2.0,
+  a248b7f725fc989c1eb26680cf4351ee33421f61. Binario dedicato nel runtime,
+  non sostituisce quello usato da altri servizi. Release linux-amd64.zip
+  SHA256 bd6a57c6c0511644267cafadd13ffdb53ece0d753e0b88857f957e78a8fbc793.
+  https://github.com/openai/tunnel-client/releases/latest
+  https://developers.openai.com/api/docs/guides/secure-mcp-tunnels
+  https://github.com/openai/tunnel-client/blob/master/docs/onboarding.md
 
 Il candidato TransductiveScience/desktop-commander-mcp, MIT,
-04ea82e8e064a7aa687971e05e3b31d5d2f89489, offre HTTP nativo ma è fermo
-alla 0.2.47. Scartato il suo cloudflare-auth-worker: /token accetta qualsiasi
-refresh_token non vuoto, i code sono JSON base64 modificabile dal client e
-/authorize non autentica l'owner. Non esporlo su Internet.
-Fonti: file cloudflare-auth-worker/src/index.js a quel commit; discussioni
-upstream #617 (31 luglio–18 settembre 2026) e #664 (30 agosto 2026).
-Non abbiamo pubblicato dettagli nei repository di terzi.
+04ea82e8e064a7aa687971e05e3b31d5d2f89489, è fermo alla 0.2.47. Scartato
+cloudflare-auth-worker: /token accetta refresh_token arbitrari non vuoti,
+code JSON base64 modificabile e /authorize senza autentica owner. Fonti:
+cloudflare-auth-worker/src/index.js a quel commit; discussioni upstream
+#617 (31 luglio–18 settembre 2026) e #664 (30 agosto 2026).
 
-Il trasporto, OAuth e l'aggregazione sono pacchetti mantenuti, non server propri:
+**Licenza transitiva:** sharp/libvips upstream include
+@img/sharp-libvips-darwin-arm64 LGPL-3.0-or-later. Segnalata prima del deploy;
+nessuna modifica ai binari, conservare licenze e avvisi originali.
 
-- ni-c/mcp-hub 0.11.6, MIT, commit e184c4e33de950e0b3f0d66bc8e7161acb905c2b:
-  OAuth/OIDC password, DCR/PKCE, refresh persistente, hub /hub.
-  https://mcp-hub.ni-c.de/guide/getting-started
-  https://mcp-hub.ni-c.de/guide/security
-  https://mcp-hub.ni-c.de/reference/environment
-- supercorp-ai/supergateway v4.2.0, MIT,
-  2b7504bbb63634f2aeb5083461bd8c9ff0d9a2c8:
-  stdio → Streamable HTTP autenticato su Studio. Binario darwin-arm64
-  verificato con SHA256SUMS e gh attestation verify (exit 0).
+## Topologia privata e invarianti
 
-**Licenza transitiva:** sharp/libvips distribuito da upstream include
-@img/sharp-libvips-darwin-arm64 LGPL-3.0-or-later. Nessuna modifica ai binari;
-conservare package.json, licenze e avvisi originali. Segnalato al coordinatore
-prima del deploy. Il codice hosting owner resta isolato.
+ChatGPT → OpenAI Secure MCP Tunnel → client ufficiale MiniPC → hub stdio →
+Desktop Commander stdio MiniPC oppure Supergateway Studio su
+100.99.195.87:9197/mcp (Tailscale, API key). Studio è elencato per primo.
+Un connettore offre list_servers/list_tools/get_tool_schema/call_tool:
+server=studio oppure server=minipc. Non sono i vecchi execute_command(host).
+Nessun account, relay o chiamata automatica a desktopcommander.app.
 
-## Topologia e invarianti
-
-ChatGPT → Cloudflare Tunnel owner → MiniPC :8497 /hub → due server:
-Studio via Tailscale 100.99.195.87:9197/mcp (Supergateway + Desktop Commander),
-MiniPC via stdio locale (Desktop Commander).
-L'aggregatore offre list_servers/list_tools/get_tool_schema/call_tool:
-server=studio o server=minipc sceglie il computer senza raddoppiare connettori.
-Studio è elencato per primo. Nessun relay/account Desktop Commander.
+Tunnel dedicato: tunnel_6ada9565bc9081918acfcd3dee77b650. Non riutilizzare
+tunnel CoS/Obsidian/Browser Use. Il client apre solo connessioni uscenti a
+OpenAI. Non esiste URL prodotto pubblico e non serve un login OAuth esterno.
+La vecchia soluzione Cloudflare/Funnel/OAuth è superata dalla decisione owner.
+Il listener health/admin è solo 127.0.0.1:8498; l'hub non ascolta su 8497.
+Usare una sola istanza tunnel-client per questo ID (affinità stdio).
 
 Studio: LaunchAgent it.domenico.desktop-commander, utente domenico,
-bind solo sull'indirizzo Tailscale, chiave API dal catalogo DESKTOP_COMMANDER_API_TOKEN,
-sandbox macOS che nega sudo/su/visudo/security. MiniPC: unit utente
-systemd desktop-commander.service, NoNewPrivileges=yes, udodo.
-Nessun sudo nell'installer. Il protocollo Studio attraversa la rete tailnet
-cifrata; non esporre :9197 su hostname pubblico.
-
-DESKTOP_COMMANDER_DISABLE_TELEMETRY=1 e DC_FLAG_URL=data:application/json,...
-usano opzioni native: niente flag remoti né telemetria. --no-onboarding
-impedisce UI/account remoti. Queste impostazioni non sono una firewall policy
-per bloccare eventuali comandi espliciti dell'utente: la prova di rete resta necessaria.
-
-Il vecchio Computer MCP (:8496, tunnel cloudflared-computer-mcp) rimane
-acceso e invariato finché la prova da ChatGPT non riesce. Non ritirare i file
-ControlCenter né ripulire Obsidian prima di quella prova.
+Supergateway solo sull'IP Tailscale, sandbox macOS che nega sudo/su/visudo/
+security. MiniPC: unit utente desktop-commander.service con NoNewPrivileges.
+Nessun sudo nell'installer. DESKTOP_COMMANDER_DISABLE_TELEMETRY=1,
+DC_FLAG_URL=data:application/json,... e --no-onboarding sono opzioni native.
+NODE_DEBUG=net è diagnostica connessioni senza payload HTTP; disattivarla
+fuori dalla finestra di accettazione. Non è un firewall contro comandi
+espliciti dell'owner.
 
 ## Build e proiezione
 
-Build e dipendenze si preparano sul MiniPC tramite workload_launcher.py build.
-Usare package-lock.json upstream; npm ci --ignore-scripts quando la memoria
-lo consente. Su questo MiniPC npm ci è stato terminato (exit 247, circa 900 MB
-registrati dal cgroup), anche con heap 256 MB; Bun 1.4.2 ha completato lo
-stesso albero. Non alzare i limiti della guardia. bun.lock generato è temporaneo,
-non sostituisce il lock upstream.
+Build e test solo sul MiniPC sotto workload_launcher.py build. Il precedente
+npm ci ha superato il budget della guardia: Bun 1.4.2 ha installato lo stesso
+albero; bun.lock è temporaneo, non sostituisce package-lock.json upstream.
+sh hosting/build.sh usa declaration=false per evitare TS2742 dei .d.ts nel
+layout Bun. Nessuna modifica ai sorgenti upstream. Per Studio preparare sul
+MiniPC bun install --ignore-scripts --os=darwin --cpu=arm64. Non copiare
+binari Linux su macOS. Conservare dist/, package.json, vendor/, node_modules/
+e hosting/ in ~/.local/opt/desktop-commander/releases/<SHA>/.
+Installare hosting/gateway/package.json nel runtime gateway/ del MiniPC.
 
-sh hosting/build.sh compila il runtime con declaration=false: la disposizione
-Bun dei moduli arg causa TS2742 durante emissione .d.ts, irrilevanti al servizio.
-Nessuna modifica ai sorgenti upstream per aggirarlo.
-Per Studio preparare le dipendenze sul MiniPC con bun install --ignore-scripts
---os=darwin --cpu=arm64, mantenendo vendor/ e i pacchetti @img della piattaforma.
-Non copiare i binari Linux sul Mac. Conservare dist/, package.json, vendor/,
-node_modules/ e hosting/ sotto ~/.local/opt/desktop-commander/releases/<SHA>/.
-Installare hosting/gateway/package.json a versione esatta nel percorso
-~/.local/opt/desktop-commander/gateway/ sul MiniPC.
+Scaricare la release ufficiale tunnel-client corrente e verificarne il digest
+GitHub prima dell'estrazione; conservare LICENSE/NOTICE/SPDX. Il writer usa
+~/.local/opt/desktop-commander/tunnel-client-0.0.17/tunnel-client. Per un
+upgrade aggiornare insieme percorso unit/writer e prove: non cambiare
+il client globale di altri servizi. Leggere sempre help quickstart/init/doctor.
 
-Proiettare tramite questo writer, mai modificando a mano i file generati:
+Proiettare esclusivamente dal writer:
 
-    secret env DESKTOP_COMMANDER_API_TOKEN -- python3 <release>/hosting/install.py studio --release <release>
-    secret env DESKTOP_COMMANDER_API_TOKEN DESKTOP_COMMANDER_OAUTH_PASSWORD -- python3 <release>/hosting/install.py minipc --release <release>
+```sh
+secret env DESKTOP_COMMANDER_API_TOKEN -- python3 hosting/install.py studio --release <release>
+secret env DESKTOP_COMMANDER_API_TOKEN COMPUTER_MCP_OPENAI_RUNTIME_KEY -- python3 hosting/install.py minipc --release <release>
+```
 
-La password del catalogo viene trasformata in bcrypt senza log o argomenti CLI;
-config/env e chiave API hanno mode 0600, directory 0700. L'hub non passa i
-segreti OAuth ai processi stdio. I dati OAuth persistenti non sono cache:
-non eliminarli per aggiornare o riparare il servizio.
+COMPUTER_MCP_OPENAI_RUNTIME_KEY è una runtime key OpenAI dedicata con Tunnels
+Read + Use. Proviene dal catalogo age; non è il vecchio token Cloudflare
+CHATGPT_COMPUTER_MCP_TUNNEL_TOKEN. Il writer proietta openai-runtime-key 0600
+e usa il riferimento file: nel profilo generato da tunnel-client init.
+Il valore non compare in argv, unit, log o ambiente del server stdio.
+DESKTOP_COMMANDER_API_TOKEN resta nell'env privato del solo hub per Studio:
+il suo processo Desktop Commander figlio riceve solo l'ambiente filtrato.
+Non cancellare vecchi segreti, DB o stato OAuth: sono dati protetti, non
+servizi da lasciare attivi. prepare-secrets.py aggiunge solo API key Studio
+con il writer age dotfiles; la chiave OpenAI va creata nell'account owner.
 
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/it.domenico.desktop-commander.plist
-    systemctl --user daemon-reload
-    systemctl --user enable --now desktop-commander.service
+Prima di avviare il trasporto privato ritirare il solo Funnel10000 e fermare
+cloudflared-computer-mcp: non spegnere OAuth su un listener ancora pubblico.
+Il vecchio backend chatgpt-twohost-mcp resta attivo fino alla prova ChatGPT.
 
-Su ri-deploy usare kickstart -k per il LaunchAgent già caricato e restart
-per systemd. Prima validare plist con plutil -lint e testare il writer:
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now desktop-commander.service
+# Al redeploy: restart, senza sovrapporre due client dello stesso tunnel.
+~/.local/opt/desktop-commander/tunnel-client-0.0.17/tunnel-client doctor --profile computer-mcp --profile-dir ~/.config/desktop-commander/tunnel-profiles --explain
+curl -fsS http://127.0.0.1:8498/readyz
+curl -fsS http://127.0.0.1:8498/health/mcp
+python3 -m unittest discover -s hosting -p 'test_*.py' -v
+```
 
-    python3 -m unittest discover -s hosting -p 'test_*.py' -v
-    DESKTOP_COMMANDER_DISABLE_TELEMETRY=1 node test/test-feature-flags-timeout.js
+## Gesto owner e prova reale
 
-Non eseguire i test upstream con una HOME personale: alcuni possono mutare
-configurazione. La suite timeout qui usa risorse temporanee proprie.
+In ChatGPT Plugins → Add custom MCP server, nome Computer MCP, Connection
+Tunnel, ID dedicato sopra, autenticazione «OAuth o nessuna autenticazione».
+Confermare il rischio e premere Crea. Nessuna password o pagina esterna.
+Fare discovery soltanto mentre il client è ready: /health/mcp deve osservare
+server/discover e tools/list same_child, non soltanto il processo acceso.
+Il path /v1/mcp/{id} è un endpoint interno del connector; non usarlo come
+URL pubblico api.openai.com e non fare inferenza API a pagamento per provarlo.
 
-## Gate pubblico e prova owner
-
-Hostname esistente e unico: computer-mcp.dichiarazionipubbliche.it, fonte
-ControlCenter/runbooks/chatgpt-twohost-mcp.md. Non creare domini nuovi e non
-usare Cloudflare Access. Preparare un cutover controllato verso :8497 dopo
-la prova locale; il servizio vecchio resta attivo e ripristinabile fino
-alla prova ChatGPT. Non confondere una nuova app /hub con quella vecchia /mcp.
-Una route transitoria può mantenere /mcp sul vecchio backend e /hub sul nuovo;
-la discovery OAuth e /token condividono però lo stesso origin: durante il
-cutover il refresh del vecchio client può richiedere rollback. Coordinare
-esplicitamente lo switch prima di alterare il tunnel o il listener attuale.
-Prima di richiedere login: /livez 200, /hub senza token 401, discovery OAuth
-raggiungibile e non pubblicizzare domini desktopcommander.app/transductive.
-
-Poi, nell'account ChatGPT principale, Settings → Apps → Create app:
-URL https://computer-mcp.dichiarazionipubbliche.it/hub, OAuth;
-autorizzare una sola volta: apri Bitwarden, voce Computer MCP (ChatGPT).
-Il login mcp-hub richiede solo password; username descrittivo owner.
-Nessuna pagina del nuovo login deve chiamarsi vault.
-Da chat reale usare call_tool con server=studio e server=minipc per hostname,
-write_file/read_file in un file temporaneo creato per la prova, e sudo -n true
-che deve fallire. Conservare ricevute reali e log di rete nella issue #477.
-Solo allora migrare skill/consumer e ritirare il vecchio servizio, tunnel,
-bridge Studio, sorgente ControlCenter e branding/test computer nel fork
-Obsidian, mantenendo i servizi e dati Obsidian indipendenti.
+Da chat reale sulla nuova app invocare call_tool su server=studio/minipc:
+start_process(command=hostname), write_file/read_file con marker univoco
+in un file temporaneo della prova, cleanup, sudo -n true (deve fallire).
+Conservare ricevute ChatGPT, contatori delivery e diagnostica rete nella
+issue #477. La sonda SDK stdio locale non certifica il prodotto ChatGPT.
+Solo dopo queste prove migrare consumer e ritirare backend legacy,
+bridge Studio, tunnel Cloudflare dedicato e sorgente/runbook ControlCenter,
+senza toccare servizi, dati o tunnel Obsidian indipendenti.

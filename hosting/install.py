@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import plistlib
 import shutil
+import shlex
 import subprocess
 
 HOME = Path.home()
@@ -23,7 +24,7 @@ def put(path, content, mode=0o600):
     temporary.replace(path)
 
 
-def configure(host, release, public_url, network_trace=False, with_tunnel=False):
+def configure(host, release, network_trace=False):
     release = Path(release).resolve(strict=True)
     node = shutil.which('node')
     if not node or not (release / 'dist/index.js').is_file():
@@ -78,22 +79,24 @@ def configure(host, release, public_url, network_trace=False, with_tunnel=False)
         },
     }
     put(CONFIG / 'mcp.json', json.dumps({'mcpServers': servers}, indent=2) + chr(10))
-    # The catalog projector is the only code allowed to read secret values.
+    # Only the Studio API secret belongs in the stdio hub environment.
     env = {
-        'EXTERNAL_URL': public_url.rstrip('/'), 'CONFIG_PATH': str(CONFIG / 'mcp.json'),
-        'DATA_PATH': str(STATE / 'oauth'), 'PORT': '8497',
-        'TRUSTED_PROXIES': 'loopback', 'DEFAULT_RESOURCE': 'hub',
-        'CIMD_ALLOWED_ORIGINS': 'https://chatgpt.com',
+        'CONFIG_PATH': str(CONFIG / 'mcp.json'),
+        'TOOL_CACHE_PATH': str(STATE / 'tool-cache.json'),
         'PATH': common['PATH'],
-        'PASSWORD': os.environ['DESKTOP_COMMANDER_OAUTH_PASSWORD'],
         'DESKTOP_COMMANDER_API_TOKEN': os.environ['DESKTOP_COMMANDER_API_TOKEN'],
     }
-    # PASSWORD_HASH avoids plaintext password exposure in the long-running hub.
-    bcrypt = BASE / 'gateway/node_modules/bcryptjs/index.js'
-    hashed = subprocess.run([node, '--input-type=module', '-e',
-        "import bcrypt from " + json.dumps(str(bcrypt)) + "; let s=''; for await (const c of process.stdin) s+=c; process.stdout.write(bcrypt.hashSync(s, 12));"],
-        input=env.pop('PASSWORD'), text=True, check=True, capture_output=True).stdout
-    env['PASSWORD_HASH'] = hashed
+    # Native stdio starts no listener or authorization server. Preserve old OAuth
+    # state on disk: it is protected data, not part of the active transport.
+    put(CONFIG / 'openai-runtime-key', os.environ['COMPUTER_MCP_OPENAI_RUNTIME_KEY'])
+    subprocess.run([str(BASE / 'tunnel-client-0.0.17/tunnel-client'), 'init',
+        '--sample', 'sample_mcp_stdio_local', '--profile', 'computer-mcp',
+        '--profile-dir', str(CONFIG / 'tunnel-profiles'), '--force',
+        '--tunnel-id', 'tunnel_6ada9565bc9081918acfcd3dee77b650',
+        '--control-plane-api-key-ref', 'file:' + str(CONFIG / 'openai-runtime-key'),
+        '--health-listen-addr', '127.0.0.1:8498',
+        '--mcp-command', shlex.join(['/usr/bin/python3', str(BASE / 'hosting/run-gateway.py')])],
+        check=True, capture_output=True, text=True)
     if network_trace:
         env['NODE_DEBUG'] = 'net'
     # JSON is read by the launcher, never sourced as shell or logged.
@@ -101,10 +104,6 @@ def configure(host, release, public_url, network_trace=False, with_tunnel=False)
     unit_source = Path(__file__).with_name('desktop-commander.service').resolve(strict=True)
     path = HOME / '.config/systemd/user/desktop-commander.service'
     put(path, unit_source.read_bytes(), 0o644)
-    if with_tunnel:
-        put(CONFIG / 'tunnel.token', os.environ['CHATGPT_COMPUTER_MCP_TUNNEL_TOKEN'] + chr(10))
-        tunnel = Path(__file__).with_name('desktop-commander-tunnel.service')
-        put(path.with_name(tunnel.name), tunnel.read_bytes(), 0o644)
     return path
 
 
@@ -112,8 +111,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('host', choices=['studio', 'minipc'])
     parser.add_argument('--release', required=True)
-    parser.add_argument('--public-url', default='https://computer-mcp.dichiarazionipubbliche.it')
     parser.add_argument('--network-trace', action='store_true', help='Node native net diagnostics; no HTTP payload logging')
-    parser.add_argument('--with-tunnel', action='store_true', help='Project the existing owner tunnel without starting/stopping it')
     args = parser.parse_args()
-    print(configure(args.host, args.release, args.public_url, args.network_trace, args.with_tunnel))
+    print(configure(args.host, args.release, args.network_trace))

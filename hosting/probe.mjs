@@ -1,14 +1,16 @@
 // Local acceptance probe, using the adopted MCP SDK, never prints credentials.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { setTimeout } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-const token = process.env.DESKTOP_COMMANDER_PROBE_TOKEN;
-assert(token, 'ephemeral probe token required');
+assert(process.env.MCP_HUB_ENTRY, 'installed native hub required');
 const client = new Client({ name: 'owner-477-acceptance', version: '1.0.0' });
-const transport = new StreamableHTTPClientTransport(new URL(process.env.PROBE_URL || 'http://127.0.0.1:8497/hub'), {
-  requestInit: { headers: { Authorization: 'Bearer ' + token } },
+const transport = new StdioClientTransport({
+  command: process.execPath, args: [process.env.MCP_HUB_ENTRY, '--stdio'],
+  env: Object.fromEntries(['PATH', 'HOME', 'CONFIG_PATH', 'TOOL_CACHE_PATH',
+    'DESKTOP_COMMANDER_API_TOKEN'].map(key => [key, process.env[key]])),
 });
 const text = result => (result.content || []).filter(x => x.type === 'text').map(x => x.text).join(String.fromCharCode(10));
 const call = async (server, tool, args) => {
@@ -18,8 +20,16 @@ const call = async (server, tool, args) => {
 };
 try {
   await client.connect(transport);
-  const servers = await client.callTool({ name: 'list_servers', arguments: {} });
-  console.log(text(servers));
+  // Native stdio initializes before its supervised children finish discovery.
+  let ready = false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const result = await client.callTool({ name: 'list_servers', arguments: {} });
+    const servers = JSON.parse(text(result)).servers;
+    ready = ['studio', 'minipc'].every(name => servers.some(s => s.name === name && s.toolCount > 0));
+    if (ready) break;
+    await setTimeout(1000);
+  }
+  assert(ready, 'native hub child discovery timed out after 30 probes');
   for (const [server, expected, home] of [
     ['studio', 'mac-studio-dodo', '/Users/domenico'],
     ['minipc', 'udodo', '/home/udodo'],

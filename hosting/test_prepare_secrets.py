@@ -19,7 +19,7 @@ class NativeWriterTest(unittest.TestCase):
                 prepare.prepare(output)
             self.assertEqual(output.read_bytes(), b'previous-ciphertext')
 
-    def test_source_map_is_preserved_and_only_two_keys_added(self):
+    def test_source_map_is_preserved_and_only_studio_key_added(self):
         with tempfile.TemporaryDirectory() as root:
             source, output = Path(root) / 'source.age', Path(root) / 'candidate.age'
             source.write_bytes(b'original-ciphertext')
@@ -35,7 +35,7 @@ class NativeWriterTest(unittest.TestCase):
                 prepare.prepare(output, source)
             self.assertEqual({k: result[k] for k in original}, original)
             self.assertEqual(set(result) - set(original), {
-                'DESKTOP_COMMANDER_API_TOKEN', 'DESKTOP_COMMANDER_OAUTH_PASSWORD'})
+                'DESKTOP_COMMANDER_API_TOKEN'})
             self.assertEqual(source.read_bytes(), b'original-ciphertext')
 
     def test_concurrent_source_change_discards_candidate(self):

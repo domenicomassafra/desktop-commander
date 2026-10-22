@@ -11,4 +11,4 @@ os.environ.update(environment)
 node = shutil.which('node')
 if not node:
     raise SystemExit('Node missing from service PATH')
-os.execv(node, [node, str(home / '.local/opt/desktop-commander/gateway/node_modules/@ni-c/mcp-hub/dist/index.js')])
+os.execv(node, [node, str(home / '.local/opt/desktop-commander/gateway/node_modules/@ni-c/mcp-hub/dist/index.js'), '--stdio'])
