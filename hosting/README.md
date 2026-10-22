@@ -5,7 +5,7 @@
 Il fork GitHub deriva direttamente da wonderwhy-er/DesktopCommanderMCP,
 MIT, commit f5c86e56e5192b25c7d8de9ed8109873385912ef (release v0.3.1).
 Nessuna modifica a src/, strumenti o autenticazione upstream.
-Il workflow owner-upstream-sync aggiorna giornalmente main con merge normale;
+Il workflow owner-upstream-sync aggiorna giornalmente main con merge standard;
 conflitti o test falliti impediscono il push, mai force. Gli aggiornamenti
 vanno nuovamente provati prima di proiettare una release sui computer.
 
@@ -21,7 +21,7 @@ Non abbiamo pubblicato dettagli nei repository di terzi.
 Il trasporto, OAuth e l'aggregazione sono pacchetti mantenuti, non server propri:
 
 - ni-c/mcp-hub 0.11.6, MIT, commit e184c4e33de950e0b3f0d66bc8e7161acb905c2b:
-  OAuth/OIDC password, DCR/PKCE, refresh persistente, aggregatore /hub.
+  OAuth/OIDC password, DCR/PKCE, refresh persistente, hub /hub.
   https://mcp-hub.ni-c.de/guide/getting-started
   https://mcp-hub.ni-c.de/guide/security
   https://mcp-hub.ni-c.de/reference/environment
@@ -33,7 +33,7 @@ Il trasporto, OAuth e l'aggregazione sono pacchetti mantenuti, non server propri
 **Licenza transitiva:** sharp/libvips distribuito da upstream include
 @img/sharp-libvips-darwin-arm64 LGPL-3.0-or-later. Nessuna modifica ai binari;
 conservare package.json, licenze e avvisi originali. Segnalato al coordinatore
-prima del deploy. Il codice hosting owner resta separato.
+prima del deploy. Il codice hosting owner resta isolato.
 
 ## Topologia e invarianti
 
@@ -45,7 +45,7 @@ server=studio o server=minipc sceglie il computer senza raddoppiare connettori.
 Studio è elencato per primo. Nessun relay/account Desktop Commander.
 
 Studio: LaunchAgent it.domenico.desktop-commander, utente domenico,
-bind solo sull'indirizzo Tailscale, chiave API dal catalogo MINIPC_MCP_TOKEN,
+bind solo sull'indirizzo Tailscale, chiave API dal catalogo DESKTOP_COMMANDER_API_TOKEN,
 sandbox macOS che nega sudo/su/visudo/security. MiniPC: unit utente
 systemd desktop-commander.service, NoNewPrivileges=yes, udodo.
 Nessun sudo nell'installer. Il protocollo Studio attraversa la rete tailnet
@@ -54,7 +54,7 @@ cifrata; non esporre :9197 su hostname pubblico.
 DESKTOP_COMMANDER_DISABLE_TELEMETRY=1 e DC_FLAG_URL=data:application/json,...
 usano opzioni native: niente flag remoti né telemetria. --no-onboarding
 impedisce UI/account remoti. Queste impostazioni non sono una firewall policy
-contro eventuali comandi espliciti dell'utente: la prova di rete resta necessaria.
+per bloccare eventuali comandi espliciti dell'utente: la prova di rete resta necessaria.
 
 Il vecchio Computer MCP (:8496, tunnel cloudflared-computer-mcp) rimane
 acceso e invariato finché la prova da ChatGPT non riesce. Non ritirare i file
@@ -81,10 +81,10 @@ Installare hosting/gateway/package.json a versione esatta nel percorso
 
 Proiettare tramite questo writer, mai modificando a mano i file generati:
 
-    secret env MINIPC_MCP_TOKEN -- python3 <release>/hosting/install.py studio --release <release>
-    secret env MINIPC_MCP_TOKEN MINIPC_MCP_OAUTH_PASSWORD -- python3 <release>/hosting/install.py minipc --release <release>
+    secret env DESKTOP_COMMANDER_API_TOKEN -- python3 <release>/hosting/install.py studio --release <release>
+    secret env DESKTOP_COMMANDER_API_TOKEN DESKTOP_COMMANDER_OAUTH_PASSWORD -- python3 <release>/hosting/install.py minipc --release <release>
 
-La password esistente viene trasformata in bcrypt senza log o argomenti CLI;
+La password del catalogo viene trasformata in bcrypt senza log o argomenti CLI;
 config/env e chiave API hanno mode 0600, directory 0700. L'hub non passa i
 segreti OAuth ai processi stdio. I dati OAuth persistenti non sono cache:
 non eliminarli per aggiornare o riparare il servizio.
@@ -104,15 +104,23 @@ configurazione. La suite timeout qui usa risorse temporanee proprie.
 
 ## Gate pubblico e prova owner
 
-Hostname proposto: desktop-commander.dichiarazionipubbliche.it → ingresso
-Cloudflare http://127.0.0.1:8497, sul tunnel dedicato dell'owner (stesso tunnel
-può avere due ingressi, mantenendo intatto computer-mcp → :8496).
+Hostname esistente e unico: computer-mcp.dichiarazionipubbliche.it, fonte
+ControlCenter/runbooks/chatgpt-twohost-mcp.md. Non creare domini nuovi e non
+usare Cloudflare Access. Preparare un cutover controllato verso :8497 dopo
+la prova locale; il servizio vecchio resta attivo e ripristinabile fino
+alla prova ChatGPT. Non confondere una nuova app /hub con quella vecchia /mcp.
+Una route transitoria può mantenere /mcp sul vecchio backend e /hub sul nuovo;
+la discovery OAuth e /token condividono però lo stesso origin: durante il
+cutover il refresh del vecchio client può richiedere rollback. Coordinare
+esplicitamente lo switch prima di alterare il tunnel o il listener attuale.
 Prima di richiedere login: /livez 200, /hub senza token 401, discovery OAuth
 raggiungibile e non pubblicizzare domini desktopcommander.app/transductive.
 
 Poi, nell'account ChatGPT principale, Settings → Apps → Create app:
-URL https://desktop-commander.dichiarazionipubbliche.it/hub, OAuth;
-autorizzare una sola volta con la password owner del connettore.
+URL https://computer-mcp.dichiarazionipubbliche.it/hub, OAuth;
+autorizzare una sola volta: apri Bitwarden, voce Computer MCP (ChatGPT).
+Il login mcp-hub richiede solo password; username descrittivo owner.
+Nessuna pagina del nuovo login deve chiamarsi vault.
 Da chat reale usare call_tool con server=studio e server=minipc per hostname,
 write_file/read_file in un file temporaneo creato per la prova, e sudo -n true
 che deve fallire. Conservare ricevute reali e log di rete nella issue #477.

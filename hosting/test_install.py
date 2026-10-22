@@ -25,7 +25,7 @@ class ProjectionTest(unittest.TestCase):
         (self.release / 'dist').mkdir(parents=True)
         (self.release / 'dist/index.js').write_text('')
         self.env = patch.dict(installer.os.environ, {
-            'MINIPC_MCP_TOKEN': 'test-only-token', 'MINIPC_MCP_OAUTH_PASSWORD': 'test-only-password'})
+            'DESKTOP_COMMANDER_API_TOKEN': 'test-only-token', 'DESKTOP_COMMANDER_OAUTH_PASSWORD': 'test-only-password'})
         self.env.start()
         self.addCleanup(self.env.stop)
 
@@ -36,7 +36,7 @@ class ProjectionTest(unittest.TestCase):
         config = json.loads((installer.CONFIG / 'mcp.json').read_text())
         self.assertEqual(list(config['mcpServers']), ['studio', 'minipc'])
         child = config['mcpServers']['minipc']['env']
-        self.assertNotIn('MINIPC_MCP_TOKEN', child)
+        self.assertNotIn('DESKTOP_COMMANDER_API_TOKEN', child)
         self.assertEqual(child['DESKTOP_COMMANDER_DISABLE_TELEMETRY'], '1')
         self.assertTrue(child['DC_FLAG_URL'].startswith('data:'))
         self.assertIn('NoNewPrivileges=yes', unit.read_text())

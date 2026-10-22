@@ -43,7 +43,7 @@ def configure(host, release, public_url):
         if not gateway.is_file():
             raise SystemExit('Install the attested Supergateway binary first')
         # Reuse an existing catalog secret, never invent a plaintext secret store.
-        token = os.environ['MINIPC_MCP_TOKEN']
+        token = os.environ['DESKTOP_COMMANDER_API_TOKEN']
         put(CONFIG / 'studio-api-key', token + chr(10))
         put(CONFIG / 'no-elevation.sb', chr(10).join(['(version 1)', '(allow default)', '']) + ''.join(
             f'(deny process-exec (literal "{p}"))' + chr(10) for p in
@@ -68,7 +68,7 @@ def configure(host, release, public_url):
     servers = {
         'studio': {
             'type': 'http', 'url': 'http://100.99.195.87:9197/mcp',
-            'headers': {'Authorization': 'Bearer ${MINIPC_MCP_TOKEN}'},
+            'headers': {'Authorization': 'Bearer ${DESKTOP_COMMANDER_API_TOKEN}'},
         },
         'minipc': {
             'command': node, 'args': [str(release / 'dist/index.js'), '--no-onboarding'],
@@ -83,8 +83,8 @@ def configure(host, release, public_url):
         'TRUSTED_PROXIES': 'loopback', 'DEFAULT_RESOURCE': 'hub',
         'CIMD_ALLOWED_ORIGINS': 'https://chatgpt.com',
         'PATH': common['PATH'],
-        'PASSWORD': os.environ['MINIPC_MCP_OAUTH_PASSWORD'],
-        'MINIPC_MCP_TOKEN': os.environ['MINIPC_MCP_TOKEN'],
+        'PASSWORD': os.environ['DESKTOP_COMMANDER_OAUTH_PASSWORD'],
+        'DESKTOP_COMMANDER_API_TOKEN': os.environ['DESKTOP_COMMANDER_API_TOKEN'],
     }
     # PASSWORD_HASH avoids plaintext password exposure in the long-running hub.
     bcrypt = BASE / 'gateway/node_modules/bcryptjs/index.js'
@@ -112,6 +112,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('host', choices=['studio', 'minipc'])
     parser.add_argument('--release', required=True)
-    parser.add_argument('--public-url', default='https://desktop-commander.dichiarazionipubbliche.it')
+    parser.add_argument('--public-url', default='https://computer-mcp.dichiarazionipubbliche.it')
     args = parser.parse_args()
     print(configure(args.host, args.release, args.public_url))
