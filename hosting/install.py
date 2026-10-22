@@ -23,7 +23,7 @@ def put(path, content, mode=0o600):
     temporary.replace(path)
 
 
-def configure(host, release, public_url):
+def configure(host, release, public_url, network_trace=False, with_tunnel=False):
     release = Path(release).resolve(strict=True)
     node = shutil.which('node')
     if not node or not (release / 'dist/index.js').is_file():
@@ -38,6 +38,8 @@ def configure(host, release, public_url):
         'PATH': os.environ['PATH'],
         'HOME': str(HOME),
     }
+    if network_trace:
+        common['NODE_DEBUG'] = 'net'
     if host == 'studio':
         gateway = BASE / 'supergateway'
         if not gateway.is_file():
@@ -92,19 +94,17 @@ def configure(host, release, public_url):
         "import bcrypt from " + json.dumps(str(bcrypt)) + "; let s=''; for await (const c of process.stdin) s+=c; process.stdout.write(bcrypt.hashSync(s, 12));"],
         input=env.pop('PASSWORD'), text=True, check=True, capture_output=True).stdout
     env['PASSWORD_HASH'] = hashed
+    if network_trace:
+        env['NODE_DEBUG'] = 'net'
     # JSON is read by the launcher, never sourced as shell or logged.
     put(CONFIG / 'gateway-env.json', json.dumps(env))
-    launcher = Path(__file__).with_name('run-gateway.py').resolve(strict=True)
-    unit = chr(10).join([
-        '[Unit]', 'Description=Desktop Commander owner MCP gateway',
-        'After=network-online.target', '', '[Service]',
-        f'ExecStart=/usr/bin/python3 {launcher}', 'Restart=on-failure',
-        'RestartSec=10', 'NoNewPrivileges=yes', 'UMask=0077',
-        'MemoryMax=1G', 'TasksMax=128', '', '[Install]',
-        'WantedBy=default.target', '',
-    ])
+    unit_source = Path(__file__).with_name('desktop-commander.service').resolve(strict=True)
     path = HOME / '.config/systemd/user/desktop-commander.service'
-    put(path, unit, 0o644)
+    put(path, unit_source.read_bytes(), 0o644)
+    if with_tunnel:
+        put(CONFIG / 'tunnel.token', os.environ['CHATGPT_COMPUTER_MCP_TUNNEL_TOKEN'] + chr(10))
+        tunnel = Path(__file__).with_name('desktop-commander-tunnel.service')
+        put(path.with_name(tunnel.name), tunnel.read_bytes(), 0o644)
     return path
 
 
@@ -113,5 +113,7 @@ if __name__ == '__main__':
     parser.add_argument('host', choices=['studio', 'minipc'])
     parser.add_argument('--release', required=True)
     parser.add_argument('--public-url', default='https://computer-mcp.dichiarazionipubbliche.it')
+    parser.add_argument('--network-trace', action='store_true', help='Node native net diagnostics; no HTTP payload logging')
+    parser.add_argument('--with-tunnel', action='store_true', help='Project the existing owner tunnel without starting/stopping it')
     args = parser.parse_args()
-    print(configure(args.host, args.release, args.public_url))
+    print(configure(args.host, args.release, args.public_url, args.network_trace, args.with_tunnel))

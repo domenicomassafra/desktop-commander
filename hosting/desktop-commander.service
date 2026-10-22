@@ -1,0 +1,15 @@
+[Unit]
+Description=Desktop Commander owner MCP gateway
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.local/opt/desktop-commander/hosting/run-gateway.py
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=yes
+UMask=0077
+MemoryMax=1G
+TasksMax=128
+
+[Install]
+WantedBy=default.target

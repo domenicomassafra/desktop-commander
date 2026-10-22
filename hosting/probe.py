@@ -10,6 +10,7 @@ home = Path.home()
 base = home / '.local/opt/desktop-commander'
 env = os.environ.copy()
 env.update(json.loads((home / '.config/desktop-commander/gateway-env.json').read_text()))
+env.pop('NODE_DEBUG', None)
 node = shutil.which('node', path=env['PATH'])
 admin = [node, str(base / 'gateway/node_modules/@ni-c/mcp-hub/dist/admin.js')]
 created = subprocess.run(admin + ['tokens', 'create', '--resource', 'hub', '--days', '1', '--label', 'probe-477'],
