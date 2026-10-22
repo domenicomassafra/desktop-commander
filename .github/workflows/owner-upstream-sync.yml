@@ -1,0 +1,29 @@
+name: Owner hosting upstream sync
+on:
+  schedule:
+    - cron: '37 6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: owner-upstream-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    if: github.repository == 'domenicomassafra/desktop-commander'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Merge upstream without force or conflict masking
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream https://github.com/wonderwhy-er/DesktopCommanderMCP.git
+          git fetch upstream main
+          git merge --no-edit upstream/main
+      - name: Validate hosting projections
+        run: python3 -m unittest discover -s hosting -p 'test_*.py' -v
+      - name: Publish verified merge
+        run: git push origin HEAD:main
