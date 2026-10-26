@@ -101,6 +101,16 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
                         evidence.append("live-release-symlink:" + path.name + ":" + name)
                     elif path.is_dir() and target != live and live not in target.parents:
                         evidence.append("unscanned-live-symlink-directory:" + path.name)
+                    elif live != target and live not in target.parents:
+                        # An external file can change independently of the
+                        # sealed build and may load a retired dependency.
+                        evidence.append("unscanned-live-symlink-file:" + path.name)
+                        if target.is_file():
+                            try:
+                                if _references_release(target, release):
+                                    evidence.append("live-release-reference:" + path.name + ":" + name)
+                            except OSError:
+                                evidence.append("unreadable-live-symlink-file:" + path.name)
                 elif path.is_file():
                     try:
                         if _references_release(path, release):
@@ -150,7 +160,8 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
                 # may reference a historical SHA even while they are idle.
                 if path.is_file() and (path.suffix in native_suffixes
                                        or os.access(path, os.X_OK)
-                                       or native_bin in path.parents):
+                                       or native_bin in path.parents
+                                       or base in path.parents):
                     try:
                         if _references_release(path, release):
                             evidence.append("unit-or-config:" + path.name + ":" + name)

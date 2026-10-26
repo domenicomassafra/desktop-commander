@@ -31,6 +31,54 @@ class RetentionSafetyTest(unittest.TestCase):
         self.assertTrue(any("live-release-reference" in reason for reason in result["blocked"]), result)
         self.assertTrue((self.releases / self.names[0]).is_dir())
 
+    def test_live_rollback_external_symlink_file_referencing_old_release_blocks_prune(self):
+        old = self.releases / self.names[0]
+        live = self.releases / self.names[1]
+        external = Path(self.folder.name) / "external-helper.mjs"
+        external.write_text("export const old = '" + str(old / "dist/index.js") + "';\n")
+        (live / ".retention-manifest.json").unlink()
+        hosting = live / "hosting"
+        hosting.mkdir()
+        (hosting / "helper.mjs").symlink_to(external)
+        seal(live)
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        result = self.promote(self.names[2])
+        self.assertTrue(any("live-release-reference" in x for x in result["blocked"]), result)
+        self.assertTrue(old.is_dir())
+
+    def test_extensionless_nonexecutable_native_hosting_script_blocks_prune(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        hosting = self.base / "hosting"
+        hosting.mkdir()
+        script = hosting / "legacy"
+        script.write_text("exec node '" + str(self.releases / self.names[0] / "dist/index.js") + "'\n")
+        script.chmod(0o644)
+        unit = self.base / "legacy.service"
+        unit.write_text("ExecStart=/bin/sh " + str(script))
+        result = test_retention.retention.promote(
+            self.names[2], host="minipc", base=self.base, consumer_paths=[unit])
+        self.assertTrue(any("unit-or-config:legacy:" in x for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_cancelled_retirement_discards_abandoned_atomic_marker(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        original = Path.replace
+
+        def interrupted(path, target):
+            if path == self.base / ".retired.new":
+                raise RuntimeError("retirement-marker-interrupted")
+            return original(path, target)
+
+        with patch.object(Path, "replace", interrupted):
+            with self.assertRaisesRegex(RuntimeError, "retirement-marker-interrupted"):
+                self.promote(self.names[2])
+        self.assertTrue((self.base / ".retired.new").is_symlink())
+        self.promote(self.names[1])
+        self.assertFalse((self.base / ".retired.new").is_symlink())
+
     def test_cancelled_revert_discards_temporary_intent_before_next_revert(self):
         self.promote(self.names[0])
         self.promote(self.names[1])
@@ -122,6 +170,54 @@ class RetentionSafetyTest(unittest.TestCase):
         self.assertTrue(any("live-release-reference" in x for x in result["blocked"]), result)
         self.assertTrue((self.releases / self.names[0]).is_dir())
         self.assertEqual((self.base / "rollback").resolve().name, self.names[1])
+
+    def test_external_file_symlink_in_live_rollback_blocks_retirement(self):
+        rollback = self.releases / self.names[1]
+        (rollback / ".retention-manifest.json").unlink()
+        outside = self.base.parent / "external-helper.mjs"
+        outside.write_text("import '" + str(self.releases / self.names[0] / "dist/index.js") + "';\n")
+        helper = rollback / "hosting" / "helper.mjs"
+        helper.parent.mkdir()
+        helper.symlink_to(outside)
+        seal(rollback)
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        result = self.promote(self.names[2])
+        self.assertTrue(any("unscanned-live-symlink" in reason for reason in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).exists())
+
+    def test_nonexecutable_extensionless_native_script_blocks_prune(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        scripts = self.base / "hosting"
+        scripts.mkdir()
+        legacy = scripts / "legacy"
+        legacy.write_text("#!/bin/sh\nnode " + str(self.releases / self.names[0] / "dist/index.js") + "\n")
+        legacy.chmod(0o644)
+        (self.base / "script.service").write_text("ExecStart=/bin/sh " + str(legacy))
+        result = self.promote(self.names[2])
+        self.assertTrue(any("unit-or-config:legacy" in reason for reason in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).exists())
+
+    def test_cancelled_retirement_discards_pending_retired_selector(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        original = Path.replace
+
+        def fail_retired_replace(path, target):
+            if path == self.base / ".retired.new":
+                raise RuntimeError("interrupted-retired-rename")
+            return original(path, target)
+
+        with patch.object(Path, "replace", fail_retired_replace):
+            with self.assertRaisesRegex(RuntimeError, "interrupted-retired-rename"):
+                self.promote(self.names[2])
+        self.assertTrue((self.base / ".retired.new").is_symlink())
+        self.promote(self.names[1])
+        self.assertFalse((self.base / ".retired.new").exists())
+        self.promote(self.names[0])
+        self.promote(self.names[2])
+        self.assertEqual((self.base / "current").resolve().name, self.names[2])
 
     def test_cancelled_revert_discards_pending_journal_symlink(self):
         self.promote(self.names[0])
