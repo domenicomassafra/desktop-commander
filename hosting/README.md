@@ -73,6 +73,17 @@ binari Linux su macOS. Conservare dist/, package.json, vendor/, node_modules/
 e hosting/ in ~/.local/opt/desktop-commander/releases/<SHA>/.
 Installare hosting/gateway/package.json nel runtime gateway/ del MiniPC.
 
+Prima della prima attivazione di **ogni nuova SHA**, assemblare `dist/`,
+`node_modules/`, `hosting/`, `vendor/` e `package.json` in una directory di
+release appena costruita da sorgente revisionato, quindi sigillare il payload
+ancora pulito usando `python3 hosting/release_manifest.py --seal
+"$HOME/.local/opt/desktop-commander/releases/<SHA>"`. Il manifest contiene
+nomi e digest SHA-256 dell'intero build; non sigillare mai a posteriori una
+release già usata come runtime (potrebbe contenere dati privati sconosciuti).
+Una release storica priva di manifest può restare come rollback ma non è
+idonea alla rimozione automatica. Il comando di build e sigillo opera prima
+dell'installer configurazione; test/build attraverso la guardia risorse.
+
 Scaricare la release ufficiale tunnel-client corrente e verificarne il digest
 GitHub prima dell'estrazione; conservare LICENSE/NOTICE/SPDX. Il writer usa
 ~/.local/opt/desktop-commander/tunnel-client-0.0.17/tunnel-client. Per un
@@ -96,13 +107,20 @@ python3 hosting/install.py minipc --release "$HOME/.local/opt/desktop-commander/
 ```
 
 The finalize operation uses no secrets: it checks launchctl/systemd, the
-selected config, the live immutable process and (on MiniPC) tunnel readyz.
+selected config, the live Node child of the actual service, and an MCP
+initialize/tools/list probe (private HTTP on Studio; native stdio on MiniPC).
+On MiniPC it also checks the tunnel readyz and its MCP health endpoint.
 It publishes `current` and `rollback` symlinks to exact SHA revisions, then
-removes only a previously healthy, reproducible, unused rollback. A busy PID,
-open file, other symlink, service reference, unreadable scan or uncertain
+removes only a previously healthy, manifest-verified, unused rollback under
+an exclusive host-local lock shared with the configurator. A busy PID,
+open file, incomplete `lsof` output, other symlink, native unit/drop-in,
+service reference, modified release payload, unreadable scan or uncertain
 revision is reported in `blocked` (exit code 2); no private data, staging
 or backups are deleted. A blocked removal is tracked by the `retired`
 selector and retried by repeating `--finalize` after the consumer exits.
+Recoverable interrupted selector writes and already-finished removal markers
+are handled idempotently. If the installed prior revision predates sealing,
+retain it as a verified rollback and block eventual deletion pending proof.
 If only one revision is installed, `rollback` is deliberately absent until
 a second healthy activation. Do not use `--finalize` before service restart.
 

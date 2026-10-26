@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Project the reviewed Desktop Commander release; never touch the old connector."""
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -122,4 +123,12 @@ if __name__ == '__main__':
         result = promote(candidate.name, host=args.host)
         print(json.dumps(result, sort_keys=True))
         raise SystemExit(2 if result['blocked'] else 0)
-    print(configure(args.host, args.release, args.network_trace))
+    # Use the same host-local lock as finalize while updating consumer config;
+    # a concurrent projection cannot race the selector/prune transaction.
+    if not BASE.is_dir() or BASE.is_symlink():
+        parser.error('native installed root must exist')
+    lock_fd = os.open(BASE / '.retention.lock',
+                      os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    with os.fdopen(lock_fd, 'r+') as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        print(configure(args.host, args.release, args.network_trace))

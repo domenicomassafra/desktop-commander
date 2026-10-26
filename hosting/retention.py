@@ -6,15 +6,19 @@ files (data, backup, staging, gateway binaries and private config) are outside
 the deletion boundary.
 """
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
 import plistlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 from urllib.request import urlopen
+
+from release_manifest import verify as verify_release_manifest
 
 BASE = Path.home() / ".local/opt/desktop-commander"
 REVISION = re.compile(r"[a-f0-9]{40}\Z")
@@ -38,23 +42,57 @@ def open_file_references():
     # Fail closed if the host cannot prove that old files are unused.
     scan = subprocess.run(["lsof", "-n", "-P", "-F", "n"], check=True,
                           capture_output=True, text=True, timeout=25)
+    if scan.stderr.strip():
+        raise RuntimeError("incomplete-lsof-scan")
     return [line[1:].split(" (deleted)")[0] for line in scan.stdout.splitlines()
             if line.startswith("n/")]
 
 
+def _process_tree():
+    scan = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], check=True,
+                          capture_output=True, text=True, timeout=12)
+    rows = []
+    for line in scan.stdout.splitlines():
+        parts = line.strip().split(maxsplit=2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
+            rows.append((int(parts[0]), int(parts[1]), parts[2]))
+    return rows
+
+
+def _selected_node_is_child(selected, root_pid, processes):
+    by_pid = {pid: (parent, command) for pid, parent, command in processes}
+    entry = str(selected / "dist/index.js")
+    for pid, (parent, command) in by_pid.items():
+        try:
+            args = shlex.split(command)
+        except ValueError:
+            continue
+        if len(args) < 2 or Path(args[0]).name not in ("node", "nodejs") or entry not in args[1:]:
+            continue
+        seen = {pid}
+        while parent in by_pid and parent not in seen:
+            if parent == root_pid:
+                return True
+            seen.add(parent)
+            parent = by_pid[parent][0]
+        if parent == root_pid:
+            return True
+    return False
+
+
 def _consumer_paths(host, home):
     if host == "studio":
-        return [home / "Library/LaunchAgents/it.domenico.desktop-commander.plist"]
+        return [home / "Library/LaunchAgents",
+                home / "Library/LaunchAgents/it.domenico.desktop-commander.plist"]
     return [home / ".config/desktop-commander/mcp.json",
             home / ".config/systemd/user/desktop-commander.service",
-            home / ".config/desktop-commander/tunnel-profiles/computer-mcp/config.json"]
+            home / ".config/desktop-commander/tunnel-profiles/computer-mcp/config.json",
+            home / ".config/desktop-commander", home / ".config/systemd/user"]
 
 
 def runtime_health(host, selected, home):
     """Require a running service with a real process and projected selected revision."""
-    processes = process_references()
-    if not any(str(selected / "dist/index.js") in cmd for _, cmd in processes):
-        raise RuntimeError("missing-running-process-for-selected-revision")
+    processes = _process_tree()
     if host == "studio":
         plist_path = home / "Library/LaunchAgents/it.domenico.desktop-commander.plist"
         plist = plistlib.loads(plist_path.read_bytes())
@@ -65,6 +103,14 @@ def runtime_health(host, selected, home):
                                 check=True, capture_output=True, text=True, timeout=12)
         if "state = running" not in status.stdout:
             raise RuntimeError("studio-unit-not-running")
+        match = re.search(r"\bpid = (\d+)", status.stdout)
+        if not match or not _selected_node_is_child(selected, int(match.group(1)), processes):
+            raise RuntimeError("missing-studio-node-child-for-selected-revision")
+        # A live gateway command is not a health proof: the actual private MCP
+        # server must initialize and answer tools/list on the running transport.
+        subprocess.run(["node", str(Path(__file__).with_name("health_probe.mjs")),
+                        str(selected), host], capture_output=True, text=True,
+                       check=True, timeout=20)
     elif host == "minipc":
         config = json.loads((home / ".config/desktop-commander/mcp.json").read_text())
         args = config["mcpServers"]["minipc"]["args"]
@@ -76,9 +122,20 @@ def runtime_health(host, selected, home):
             capture_output=True, text=True, timeout=12).stdout
         if "ActiveState=active" not in status or "MainPID=0" in status:
             raise RuntimeError("minipc-unit-not-running")
+        match = re.search(r"MainPID=(\d+)", status)
+        if not match or not _selected_node_is_child(selected, int(match.group(1)), processes):
+            raise RuntimeError("missing-minipc-node-child-for-selected-revision")
         with urlopen("http://127.0.0.1:8498/readyz", timeout=5) as response:
             if response.status != 200:
                 raise RuntimeError("minipc-tunnel-not-ready")
+        with urlopen("http://127.0.0.1:8498/health/mcp", timeout=5) as response:
+            if response.status != 200:
+                raise RuntimeError("minipc-mcp-not-ready")
+        # Check actual MCP initialize and tools/list against the exact build,
+        # independently of the tunnel listener's readyz response.
+        subprocess.run(["node", str(Path(__file__).with_name("health_probe.mjs")),
+                        str(selected), host], capture_output=True, text=True,
+                       check=True, timeout=20)
     else:
         raise ValueError("unsupported-host:" + host)
 
@@ -101,10 +158,35 @@ def _selector(base, name, releases):
 def _point(base, label, release):
     link = base / label
     temporary = base / ("." + label + ".new")
-    if temporary.exists() or temporary.is_symlink():
+    target = Path("releases") / release
+    if temporary.is_symlink() and temporary.readlink() == target:
+        # A crash can leave the exact pending atomic update. It is safe to
+        # repeat only this exact operation, never an unrelated stale update.
+        temporary.unlink()
+    elif temporary.exists() or temporary.is_symlink():
         raise RuntimeError("pending-selector-update:" + label)
-    temporary.symlink_to(Path("releases") / release)
+    temporary.symlink_to(target)
     temporary.replace(link)
+
+
+def _retired(base, releases, selected, rollback):
+    """Recover a completed removal whose retired marker was not yet cleared."""
+    try:
+        return _selector(base, "retired", releases)
+    except RuntimeError as exc:
+        if not str(exc).startswith("broken-selector:retired"):
+            raise
+        marker = base / "retired"
+        if not marker.is_symlink():
+            raise
+        target = marker.readlink()
+        if (len(target.parts) != 2 or target.parts[0] != "releases"
+                or not REVISION.fullmatch(target.parts[1])
+                or target.parts[1] in (selected, rollback)
+                or (releases / target.parts[1]).exists()):
+            raise
+        marker.unlink()
+        return None
 
 
 def _obstructions(base, release, consumer_paths):
@@ -116,7 +198,8 @@ def _obstructions(base, release, consumer_paths):
         entries = list(release.iterdir())
         if any(entry.name.lower() in protected for entry in entries):
             evidence.append("protected-payload:" + name)
-        allowed = {"dist", "hosting", "node_modules", "package.json", "vendor"}
+        allowed = {"dist", "hosting", "node_modules", "package.json", "vendor",
+                   ".retention-manifest.json"}
         if any(entry.name not in allowed for entry in entries):
             evidence.append("unrecognized-content:" + name)
         # Runtime archives have nested directories. Guard private paths inside
@@ -137,6 +220,8 @@ def _obstructions(base, release, consumer_paths):
                 evidence.append("unrecognized-package:" + name)
         except (OSError, ValueError, KeyError):
             evidence.append("unverified-package:" + name)
+        if not verify_release_manifest(release):
+            evidence.append("unverified-release-payload:" + name)
     except OSError:
         evidence.append("unreadable-release:" + name)
     try:
@@ -150,28 +235,52 @@ def _obstructions(base, release, consumer_paths):
             if path == str(release) or path.startswith(str(release) + os.sep):
                 evidence.append("open-file:" + name)
                 break
-    except (OSError, subprocess.SubprocessError) as exc:
-        evidence.append("open-file-scan-unavailable:" + type(exc).__name__)
-    # Selectors and any other symlink directly below the installed product
-    # may outlive a renamed service. Never remove their targets.
-    # Bounded search in the product and the native consumer's config/bin dirs.
+    except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
+        detail = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+        evidence.append("open-file-scan-unavailable:" + detail)
+    # Scan native consumer directories including other units and drop-ins, not
+    # only today's known service filename. Keep the release tree out of the
+    # consumer scan; its complete content is checked against its build seal.
     folders = {base, base / "hosting", base.parent.parent / "bin"}
-    folders.update(path.parent for path in consumer_paths)
+    folders.update(path if path.is_dir() else path.parent for path in consumer_paths)
+    native_suffixes = {".plist", ".json", ".service", ".conf", ".socket",
+                       ".timer", ".target", ".yaml", ".yml", ".toml"}
     for folder in folders:
         if not folder.is_dir():
             continue
-        for link in folder.iterdir():
-            if not link.is_symlink():
-                continue
-            if link == base / "retired":
-                continue  # Native pending-retirement marker is not a consumer.
+        scan = [folder]
+        if folder != base:
+            for current, directories, _ in os.walk(
+                    folder, followlinks=False,
+                    onerror=lambda exc: evidence.append("unreadable-native-config:" + name)):
+                if len(Path(current).relative_to(folder).parts) >= 5:
+                    directories.clear()
+                scan.append(Path(current))
+        for current in set(scan):
             try:
-                target = link.resolve(strict=True)
-            except (OSError, RuntimeError):
-                evidence.append("unresolved-symlink:" + link.name)
+                entries = list(current.iterdir())
+            except OSError:
+                evidence.append("unreadable-native-config:" + name)
                 continue
-            if target == release.resolve() or release.resolve() in target.parents:
-                evidence.append("symlink:" + link.name + ":" + name)
+            for path in entries:
+                if current == base and path.name == "releases":
+                    continue
+                if path == base / "retired":
+                    continue  # Managed pending-retirement marker.
+                if path.is_symlink():
+                    try:
+                        target = path.resolve(strict=True)
+                    except (OSError, RuntimeError):
+                        evidence.append("unresolved-symlink:" + path.name)
+                        continue
+                    if target == release.resolve() or release.resolve() in target.parents:
+                        evidence.append("symlink:" + path.name + ":" + name)
+                if path.is_file() and path.suffix in native_suffixes:
+                    try:
+                        if str(release) in path.read_text(errors="replace"):
+                            evidence.append("unit-or-config:" + path.name + ":" + name)
+                    except OSError:
+                        evidence.append("unreadable-native-config:" + path.name)
     for path in consumer_paths:
         try:
             if path.is_file() and str(release) in path.read_text(errors="replace"):
@@ -181,7 +290,7 @@ def _obstructions(base, release, consumer_paths):
     return evidence
 
 
-def promote(revision, *, host, base=BASE, consumer_paths=None):
+def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
     """Commit a healthy revision, keep its exact predecessor and prune proven-unused ones.
 
     Returns a result with detailed blockers. A deletion blocker does not undo
@@ -196,9 +305,16 @@ def promote(revision, *, host, base=BASE, consumer_paths=None):
         raise RuntimeError("missing-immutable-release:" + revision)
     old = _selector(base, "current", releases)
     previous = _selector(base, "rollback", releases)
-    pending = _selector(base, "retired", releases)
+    pending = _retired(base, releases, old, previous)
     if previous == old and previous is not None and not pending:
-        raise RuntimeError("invalid-duplicate-rollback")
+        # The previous attempt can have published rollback=A then crashed
+        # before publishing current=B. Do not mistake A for an old rollback
+        # eligible for retirement while A is still the current release.
+        if old == revision:
+            raise RuntimeError("invalid-duplicate-rollback")
+        previous = None
+    if old is None and previous:
+        raise RuntimeError("orphan-rollback")
     if pending and old != revision and previous not in (pending, old):
         raise RuntimeError("retirement-pending:" + pending)
     # A rollback can itself become selected during an explicit revert. Such a
@@ -237,9 +353,28 @@ def promote(revision, *, host, base=BASE, consumer_paths=None):
     if not blockers:
         for release in candidates:
             # Recheck immediately before each potentially destructive operation.
+            if (not getattr(shutil.rmtree, "avoids_symlink_attacks", False)
+                    or release.is_symlink() or release.name in keep):
+                blockers.append("unsafe-remove-target:" + release.name)
+                break
+            identity = release.stat(follow_symlinks=False)
+            if (_selector(base, "current", releases) != revision
+                    or _selector(base, "rollback", releases) != rollback
+                    or _selector(base, "retired", releases) != release.name):
+                blockers.append("changed-selector-before-prune:" + release.name)
+                break
+            try:
+                runtime_health(host, selected, Path.home())
+            except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as exc:
+                blockers.append("consumer-health-changed:" + type(exc).__name__)
+                break
             fresh = _obstructions(base, release, paths)
             if fresh:
                 blockers.extend(fresh)
+                break
+            if (release.is_symlink() or
+                    release.stat(follow_symlinks=False) != identity):
+                blockers.append("changed-release-before-prune:" + release.name)
                 break
             shutil.rmtree(release)
             removed.append(release.name)
@@ -247,6 +382,19 @@ def promote(revision, *, host, base=BASE, consumer_paths=None):
                 (base / "retired").unlink()
     return {"selected": revision, "rollback": rollback, "removed": removed,
             "blocked": sorted(set(blockers))}
+
+
+def promote(revision, *, host, base=BASE, consumer_paths=None):
+    """Serialize the entire selector transaction and guarded retirement per host."""
+    base = Path(base)
+    if not base.is_dir() or base.is_symlink():
+        raise RuntimeError("unsafe-release-root")
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(base / ".retention.lock", flags, 0o600)
+    with os.fdopen(descriptor, "r+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        return _promote_locked(revision, host=host, base=base,
+                               consumer_paths=consumer_paths)
 
 
 def main():

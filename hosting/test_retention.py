@@ -1,13 +1,22 @@
 import importlib.util
 import json
 from pathlib import Path
+import plistlib
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
+import sys
+sys.path.insert(0, str(Path(__file__).parent))
+from release_manifest import seal
+
 spec = importlib.util.spec_from_file_location("retention", Path(__file__).with_name("retention.py"))
 retention = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(retention)
+REAL_OPEN_FILE_REFERENCES = retention.open_file_references
+REAL_RUNTIME_HEALTH = retention.runtime_health
 
 
 class ImmutablePromotionTest(unittest.TestCase):
@@ -24,6 +33,11 @@ class ImmutablePromotionTest(unittest.TestCase):
             (path / "index.js").write_text("// built\n")
             (self.releases / name / "package.json").write_text(
                 json.dumps({"name": "@wonderwhy-er/desktop-commander"}))
+            if name == self.names[0]:
+                dep = self.releases / name / "node_modules" / "package" / "state"
+                dep.mkdir(parents=True)
+                (dep / "index.js").write_text("// bundled dependency")
+            seal(self.releases / name)
         self.probes = patch.multiple(retention, runtime_health=lambda *args: None,
                                      process_references=lambda *args: [],
                                      open_file_references=lambda *args: [])
@@ -129,6 +143,82 @@ class ImmutablePromotionTest(unittest.TestCase):
         self.assertEqual((self.base / "rollback").resolve().name, self.names[1])
         self.assertEqual((self.base / "current").resolve().name, self.names[2])
 
+    def test_interrupted_between_first_rollback_and_current_can_retry(self):
+        shutil.rmtree(self.releases / self.names[2])  # This scenario has only A and B.
+        self.promote(self.names[0])
+        original = retention._point
+
+        def interrupted(base, label, release):
+            if label == "current":
+                raise RuntimeError("simulated interruption")
+            return original(base, label, release)
+
+        with patch.object(retention, "_point", side_effect=interrupted):
+            with self.assertRaisesRegex(RuntimeError, "simulated interruption"):
+                self.promote(self.names[1])
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[0])
+        result = self.promote(self.names[1])
+        self.assertEqual(result["blocked"], [])
+        self.assertEqual((self.base / "current").resolve().name, self.names[1])
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[0])
+        self.assertTrue((self.releases / self.names[0]).exists())
+
+    def test_deleted_retired_release_marker_recovers_after_interruption(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        retired = self.base / "retired"
+        real_unlink = Path.unlink
+
+        def interrupted_unlink(path, *args, **kwargs):
+            if path == retired:
+                raise RuntimeError("interrupted-after-rmtree")
+            return real_unlink(path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", interrupted_unlink):
+            with self.assertRaisesRegex(RuntimeError, "interrupted-after-rmtree"):
+                self.promote(self.names[2])
+        self.assertFalse((self.releases / self.names[0]).exists())
+        self.assertTrue(retired.is_symlink())
+        result = self.promote(self.names[2])
+        self.assertEqual(result["blocked"], [])
+        self.assertFalse(retired.is_symlink())
+
+    def test_partial_lsof_output_blocks_pruning(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        scan = subprocess.CompletedProcess([], 0, "n/unrelated/file\n", "lsof: WARNING: partial scan\n")
+        with patch.object(retention.subprocess, "run", return_value=scan), \
+             patch.object(retention, "open_file_references", REAL_OPEN_FILE_REFERENCES):
+            result = self.promote(self.names[2])
+        self.assertTrue(any("incomplete-lsof-scan" in reason for reason in result["blocked"]))
+        self.assertTrue((self.releases / self.names[0]).exists())
+
+    def test_other_native_unit_dropin_referencing_old_release_blocks_prune(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        directory = self.base / "user-units"
+        dropin = directory / "other.service.d" / "override.conf"
+        dropin.parent.mkdir(parents=True)
+        dropin.write_text("Environment=ENTRY=" + str(self.releases / self.names[0]))
+        result = retention.promote(self.names[2], host="minipc", base=self.base,
+                                   consumer_paths=[directory])
+        self.assertTrue(any("unit-or-config" in reason for reason in result["blocked"]))
+        self.assertTrue((self.releases / self.names[0]).exists())
+
+    def test_studio_gateway_parent_without_healthy_node_cannot_promote(self):
+        self.promote(self.names[0])
+        path = self.releases / self.names[1]
+        payload = plistlib.dumps({"ProgramArguments": ["supergateway", "--stdio",
+                          "node " + str(path / "dist/index.js")]})
+        status = subprocess.CompletedProcess([], 0, "state = running\npid = 4321\n", "")
+        with patch.object(retention, "runtime_health", REAL_RUNTIME_HEALTH), \
+             patch.object(retention, "_process_tree", return_value=[
+                 (4321, 1, "supergateway --stdio node " + str(path / "dist/index.js"))]), \
+             patch.object(Path, "read_bytes", return_value=payload), \
+             patch.object(retention.subprocess, "run", return_value=status):
+            with self.assertRaisesRegex(RuntimeError, "missing-studio-node-child"):
+                retention.runtime_health("studio", path, self.base)
+
     def test_unknown_payload_inside_sha_directory_blocks_prune(self):
         self.promote(self.names[0])
         self.promote(self.names[1])
@@ -159,12 +249,31 @@ class ImmutablePromotionTest(unittest.TestCase):
         self.assertTrue(any("protected-payload" in reason for reason in result["blocked"]))
         self.assertEqual((protected / "private.txt").read_text(), "must stay")
 
+    def test_nested_data_inside_hosting_prevents_deletion(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        protected = self.releases / self.names[0] / "hosting" / "data"
+        protected.mkdir(parents=True)
+        (protected / "owner.sqlite").write_text("owner-only")
+        result = self.promote(self.names[2])
+        self.assertTrue(result["blocked"], result)
+        self.assertEqual((protected / "owner.sqlite").read_text(), "owner-only")
+
+    def test_changed_compiled_payload_after_build_seal_prevents_deletion(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        entry = self.releases / self.names[0] / "dist/index.js"
+        entry.write_text("// modified after sealed build\n")
+        result = self.promote(self.names[2])
+        self.assertTrue(any("unverified-release-payload" in reason
+                            for reason in result["blocked"]))
+        self.assertEqual(entry.read_text(), "// modified after sealed build\n")
+
     def test_package_module_state_is_not_mistaken_for_private_runtime_state(self):
         self.promote(self.names[0])
         self.promote(self.names[1])
         package = self.releases / self.names[0] / "node_modules" / "package" / "state"
-        package.mkdir(parents=True)
-        (package / "index.js").write_text("// bundled dependency")
+        self.assertTrue((package / "index.js").is_file())
         result = self.promote(self.names[2])
         self.assertEqual(result["blocked"], [])
         self.assertEqual(result["removed"], [self.names[0]])
