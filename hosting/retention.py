@@ -113,8 +113,18 @@ def _obstructions(base, release, consumer_paths):
     protected = {"data", "backup", "backups", "state", "staging",
                  "venv", ".venv", "_local", "private"}
     try:
-        if any(entry.name.lower() in protected for entry in release.iterdir()):
+        entries = list(release.iterdir())
+        if any(entry.name.lower() in protected for entry in entries):
             evidence.append("protected-payload:" + name)
+        allowed = {"dist", "hosting", "node_modules", "package.json", "vendor"}
+        if any(entry.name not in allowed for entry in entries):
+            evidence.append("unrecognized-content:" + name)
+        manifest = release / "package.json"
+        try:
+            if json.loads(manifest.read_text())["name"] != "@wonderwhy-er/desktop-commander":
+                evidence.append("unrecognized-package:" + name)
+        except (OSError, ValueError, KeyError):
+            evidence.append("unverified-package:" + name)
     except OSError:
         evidence.append("unreadable-release:" + name)
     try:

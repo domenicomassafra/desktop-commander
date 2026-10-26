@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -21,6 +22,8 @@ class ImmutablePromotionTest(unittest.TestCase):
             path = self.releases / name / "dist"
             path.mkdir(parents=True)
             (path / "index.js").write_text("// built\n")
+            (self.releases / name / "package.json").write_text(
+                json.dumps({"name": "@wonderwhy-er/desktop-commander"}))
         self.probes = patch.multiple(retention, runtime_health=lambda *args: None,
                                      process_references=lambda *args: [],
                                      open_file_references=lambda *args: [])
@@ -112,6 +115,16 @@ class ImmutablePromotionTest(unittest.TestCase):
         self.assertEqual(result["removed"], [self.names[0]])
         self.assertEqual((self.base / "rollback").resolve().name, self.names[1])
         self.assertEqual((self.base / "current").resolve().name, self.names[2])
+
+    def test_unknown_payload_inside_sha_directory_blocks_prune(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        private = self.releases / self.names[0] / "personal-audio.dat"
+        private.write_bytes(b"do not delete")
+        result = self.promote(self.names[2])
+        self.assertTrue(any("unrecognized-content" in reason
+                            for reason in result["blocked"]))
+        self.assertEqual(private.read_bytes(), b"do not delete")
 
     def test_private_venv_inside_a_revision_prevents_deletion(self):
         self.promote(self.names[0])
