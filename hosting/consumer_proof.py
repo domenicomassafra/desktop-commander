@@ -115,4 +115,3 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
         except OSError:
             evidence.append("unreadable-consumer:" + path.name)
     return evidence
-
