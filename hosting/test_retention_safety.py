@@ -4,6 +4,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 import test_retention
+from release_manifest import seal
 
 
 class RetentionSafetyTest(unittest.TestCase):
@@ -19,6 +20,37 @@ class RetentionSafetyTest(unittest.TestCase):
         result = self.promote(self.names[2])
         self.assertTrue(any("live-release-symlink" in x for x in result["blocked"]), result)
         self.assertTrue((self.releases / self.names[0] / "dist/index.js").is_file())
+
+    def test_live_rollback_script_referencing_old_release_prevents_prune(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        dependency = self.releases / self.names[1] / "hosting" / "legacy.mjs"
+        dependency.parent.mkdir(exist_ok=True)
+        dependency.write_text("export const path = '" + str(self.releases / self.names[0]) + "';\n")
+        result = self.promote(self.names[2])
+        self.assertTrue(any("live-release-reference" in reason for reason in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_cancelled_revert_discards_temporary_intent_before_next_revert(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        self.promote(self.names[2])
+        original = Path.replace
+
+        def fail_journal_replace(path, target):
+            if path == self.base / ".revert-intent.new":
+                raise RuntimeError("interrupted-journal-rename")
+            return original(path, target)
+
+        with patch.object(Path, "replace", fail_journal_replace):
+            with self.assertRaisesRegex(RuntimeError, "interrupted-journal-rename"):
+                self.promote(self.names[1])
+        self.assertTrue((self.base / ".revert-intent.new").is_symlink())
+        self.promote(self.names[2])
+        self.assertFalse((self.base / ".revert-intent.new").is_symlink())
+        self.promote(self.names[1])
+        self.assertEqual((self.base / "current").resolve().name, self.names[1])
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[2])
 
     def test_revert_to_rollback_with_pending_retirement(self):
         self.promote(self.names[0])
@@ -75,6 +107,41 @@ class RetentionSafetyTest(unittest.TestCase):
             self.names[2], host="minipc", base=self.base, consumer_paths=[unit])
         self.assertTrue(any("unit-or-config:legacy.mjs" in x for x in result["blocked"]), result)
         self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_sealed_live_rollback_script_referencing_retiring_release_blocks_prune(self):
+        # Package a genuine B build with a reference to A before activating B.
+        rollback = self.releases / self.names[1]
+        (rollback / ".retention-manifest.json").unlink()
+        script = rollback / "hosting" / "legacy.mjs"
+        script.parent.mkdir()
+        script.write_text("import '" + str(self.releases / self.names[0] / "dist/index.js") + "';\n")
+        seal(rollback)
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        result = self.promote(self.names[2])
+        self.assertTrue(any("live-release-reference" in x for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[1])
+
+    def test_cancelled_revert_discards_pending_journal_symlink(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        self.promote(self.names[2])
+        real_replace = Path.replace
+
+        def interrupted_replace(path, target):
+            if path == self.base / ".revert-intent.new":
+                raise RuntimeError("interrupted-revert-journal-rename")
+            return real_replace(path, target)
+
+        with patch.object(Path, "replace", interrupted_replace):
+            with self.assertRaisesRegex(RuntimeError, "interrupted-revert-journal-rename"):
+                self.promote(self.names[1])
+        self.assertTrue((self.base / ".revert-intent.new").is_symlink())
+        self.promote(self.names[2])
+        self.assertFalse((self.base / ".revert-intent.new").exists())
+        self.assertEqual((self.base / "current").resolve().name, self.names[2])
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[1])
 
     def test_first_promotion_abandonment_restores_no_rollback(self):
         self.promote(self.names[0])

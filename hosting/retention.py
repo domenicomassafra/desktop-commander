@@ -296,6 +296,7 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
         # writes from the activation that did not become current.
         _discard_abandoned_temporary(base, "current")
         _discard_abandoned_temporary(base, "rollback")
+        _discard_abandoned_temporary(base, "revert-intent")
     if old is None and previous:
         raise RuntimeError("orphan-rollback")
     if (pending and old != revision and previous not in (pending, old)

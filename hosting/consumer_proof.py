@@ -91,17 +91,22 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
                 onerror=lambda exc: evidence.append("unreadable-live-release:" + live.name)):
             for filename in directories + files:
                 path = Path(folder) / filename
-                if not path.is_symlink():
-                    continue
-                try:
-                    target = path.resolve(strict=True)
-                except (OSError, RuntimeError):
-                    evidence.append("unresolved-live-symlink:" + path.name)
-                    continue
-                if target == retired_root or retired_root in target.parents:
-                    evidence.append("live-release-symlink:" + path.name + ":" + name)
-                elif path.is_dir() and target != live and live not in target.parents:
-                    evidence.append("unscanned-live-symlink-directory:" + path.name)
+                if path.is_symlink():
+                    try:
+                        target = path.resolve(strict=True)
+                    except (OSError, RuntimeError):
+                        evidence.append("unresolved-live-symlink:" + path.name)
+                        continue
+                    if target == retired_root or retired_root in target.parents:
+                        evidence.append("live-release-symlink:" + path.name + ":" + name)
+                    elif path.is_dir() and target != live and live not in target.parents:
+                        evidence.append("unscanned-live-symlink-directory:" + path.name)
+                elif path.is_file():
+                    try:
+                        if _references_release(path, release):
+                            evidence.append("live-release-reference:" + path.name + ":" + name)
+                    except OSError:
+                        evidence.append("unreadable-live-file:" + path.name)
     # Scan native consumer directories including other units and drop-ins, not
     # only today's known service filename. Keep the release tree out of the
     # consumer scan; its complete content is checked against its build seal.
