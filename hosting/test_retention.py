@@ -69,6 +69,19 @@ class ImmutablePromotionTest(unittest.TestCase):
         self.assertFalse((self.base / "retired").exists())
         self.assertEqual(sorted(p.name for p in self.releases.iterdir()), self.names[1:])
 
+    def test_promoting_exact_rollback_does_not_retire_the_selected_release(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        self.promote(self.names[2])
+        reverted = self.promote(self.names[1])
+        self.assertEqual(reverted["blocked"], [])
+        self.assertEqual(reverted["removed"], [])
+        self.assertFalse((self.base / "retired").is_symlink())
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[2])
+        restored = self.promote(self.names[2])
+        self.assertEqual(restored["blocked"], [])
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[1])
+
     def test_unit_and_symlink_block_prune(self):
         self.promote(self.names[0])
         self.promote(self.names[1])
@@ -135,6 +148,26 @@ class ImmutablePromotionTest(unittest.TestCase):
         result = self.promote(self.names[2])
         self.assertTrue(any("protected-payload" in reason for reason in result["blocked"]))
         self.assertEqual((protected / "personal.txt").read_text(), "must stay")
+
+    def test_nested_private_data_inside_hosting_prevents_deletion(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        protected = self.releases / self.names[0] / "hosting" / "backup"
+        protected.mkdir(parents=True)
+        (protected / "private.txt").write_text("must stay")
+        result = self.promote(self.names[2])
+        self.assertTrue(any("protected-payload" in reason for reason in result["blocked"]))
+        self.assertEqual((protected / "private.txt").read_text(), "must stay")
+
+    def test_package_module_state_is_not_mistaken_for_private_runtime_state(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        package = self.releases / self.names[0] / "node_modules" / "package" / "state"
+        package.mkdir(parents=True)
+        (package / "index.js").write_text("// bundled dependency")
+        result = self.promote(self.names[2])
+        self.assertEqual(result["blocked"], [])
+        self.assertEqual(result["removed"], [self.names[0]])
 
     def test_unhealthy_activation_never_moves_selectors(self):
         self.promote(self.names[0])

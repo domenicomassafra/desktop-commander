@@ -119,6 +119,18 @@ def _obstructions(base, release, consumer_paths):
         allowed = {"dist", "hosting", "node_modules", "package.json", "vendor"}
         if any(entry.name not in allowed for entry in entries):
             evidence.append("unrecognized-content:" + name)
+        # Runtime archives have nested directories. Guard private paths inside
+        # an otherwise permitted top-level folder before removing its tree.
+        # dist/data and dependency "state" folders are native build output.
+        nested_protected = protected - {"data", "state"}
+        for folder, directories, files in os.walk(release, followlinks=False,
+                                                   onerror=lambda exc: evidence.append(
+                                                       "unreadable-release:" + name)):
+            if Path(folder) == release:
+                continue
+            if any(part.lower() in nested_protected for part in directories + files):
+                evidence.append("protected-payload:" + name)
+                break
         manifest = release / "package.json"
         try:
             if json.loads(manifest.read_text())["name"] != "@wonderwhy-er/desktop-commander":
@@ -189,7 +201,9 @@ def promote(revision, *, host, base=BASE, consumer_paths=None):
         raise RuntimeError("invalid-duplicate-rollback")
     if pending and old != revision and previous not in (pending, old):
         raise RuntimeError("retirement-pending:" + pending)
-    retiring = pending or (previous if old != revision else None)
+    # A rollback can itself become selected during an explicit revert. Such a
+    # release must never be marked retired, even transiently.
+    retiring = pending or (previous if old != revision and previous != revision else None)
     # Health is proven before mutating a selector or touching a release.
     runtime_health(host, selected, Path.home())
     if old != revision:
