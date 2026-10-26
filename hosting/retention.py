@@ -92,10 +92,19 @@ def _consumer_paths(host, home):
     if host == "studio":
         return [home / "Library/LaunchAgents",
                 home / "Library/LaunchAgents/it.domenico.desktop-commander.plist"]
+    # systemd combines user, runtime, generator and vendor unit locations.
+    # Its native unit-paths query is the source of truth for this host.
+    try:
+        discovered = subprocess.run(["systemd-analyze", "--user", "unit-paths"],
+                                    capture_output=True, text=True, check=True, timeout=12)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("systemd-user-unit-census-unavailable:" + type(exc).__name__) from exc
+    units = [Path(line.strip()) for line in discovered.stdout.splitlines() if line.strip()]
+    if not units or any(not unit.is_absolute() for unit in units):
+        raise RuntimeError("incomplete-systemd-user-unit-census")
     return [home / ".config/desktop-commander/mcp.json",
-            home / ".config/systemd/user/desktop-commander.service",
             home / ".config/desktop-commander/tunnel-profiles/computer-mcp/config.json",
-            home / ".config/desktop-commander", home / ".config/systemd/user"]
+            home / ".config/desktop-commander", *units]
 
 
 def runtime_health(host, selected, home):

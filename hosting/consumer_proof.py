@@ -69,7 +69,8 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
         evidence.append("unreadable-release:" + name)
     try:
         for pid, cmd in process_references():
-            if str(release) in cmd:
+            if (str(release) in cmd or re.search(
+                    r"(?<![a-f0-9])" + re.escape(name) + r"(?![a-f0-9])", cmd)):
                 evidence.append("pid:" + str(pid) + ":" + name)
     except (OSError, subprocess.SubprocessError) as exc:
         evidence.append("process-scan-unavailable:" + type(exc).__name__)
