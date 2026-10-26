@@ -1,6 +1,8 @@
 """Retirement needs evidence about native consumers beyond absolute paths."""
 import subprocess
+import plistlib
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import test_retention
@@ -57,4 +59,39 @@ class NativeConsumerCensusTest(unittest.TestCase):
         with patch.object(test_retention.retention.subprocess, "run", side_effect=failure):
             with self.assertRaisesRegex(RuntimeError, "systemd-user-unit-census-unavailable"):
                 test_retention.retention.promote(self.names[2], host="minipc", base=self.base)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_inactive_system_launchdaemon_blocks_retiring_revision(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        root = self.base.parent / "Library" / "LaunchDaemons"
+        root.mkdir(parents=True)
+        (root / "legacy.plist").write_bytes(plistlib.dumps({
+            "Label": "org.example.legacy",
+            "ProgramArguments": ["node", str(self.releases / self.names[0] / "dist/index.js")],
+        }))
+        with patch.object(test_retention.retention, "SYSTEM_LAUNCHD_ROOTS", (root,),
+                          create=True):
+            result = test_retention.retention.promote(
+                self.names[2], host="studio", base=self.base)
+        self.assertTrue(any("unit-or-config:legacy.plist" in x for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_unreadable_system_launchd_root_blocks_retirement(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        root = self.base.parent / "Library" / "LaunchDaemons"
+        root.mkdir(parents=True)
+        original = Path.lstat
+
+        def unreadable(path, *args, **kwargs):
+            if path == root:
+                raise PermissionError("simulated launchd access denied")
+            return original(path, *args, **kwargs)
+
+        with patch.object(test_retention.retention, "SYSTEM_LAUNCHD_ROOTS", (root,)), \
+             patch.object(Path, "lstat", unreadable):
+            result = test_retention.retention.promote(
+                self.names[2], host="studio", base=self.base)
+        self.assertTrue(any("unreadable-native-root" in x for x in result["blocked"]), result)
         self.assertTrue((self.releases / self.names[0]).is_dir())

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 
 from release_manifest import verify as verify_release_manifest
@@ -139,10 +140,18 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
                        ".sh", ".bash", ".zsh", ".fish", ".py", ".rb", ".pl",
                        ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"}
     for folder in folders:
-        if not folder.is_dir():
+        try:
+            metadata = folder.lstat()
+        except FileNotFoundError:
             continue
-        if folder.is_symlink():
+        except OSError:
+            evidence.append("unreadable-native-root:" + folder.name)
+            continue
+        if stat.S_ISLNK(metadata.st_mode):
             evidence.append("unverified-native-root:" + folder.name)
+            continue
+        if not stat.S_ISDIR(metadata.st_mode):
+            evidence.append("invalid-native-root:" + folder.name)
             continue
         for current, directories, files in os.walk(
                 folder, followlinks=False,

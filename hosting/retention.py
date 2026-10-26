@@ -22,6 +22,10 @@ from consumer_proof import obstructions as inspect_obstructions
 
 BASE = Path.home() / ".local/opt/desktop-commander"
 REVISION = re.compile(r"[a-f0-9]{40}\Z")
+SYSTEM_LAUNCHD_ROOTS = (Path("/Library/LaunchAgents"),
+                       Path("/Library/LaunchDaemons"),
+                       Path("/System/Library/LaunchAgents"),
+                       Path("/System/Library/LaunchDaemons"))
 
 
 def process_references():
@@ -91,7 +95,8 @@ def _selected_node_is_child(selected, root_pid, processes):
 def _consumer_paths(host, home):
     if host == "studio":
         return [home / "Library/LaunchAgents",
-                home / "Library/LaunchAgents/it.domenico.desktop-commander.plist"]
+                home / "Library/LaunchAgents/it.domenico.desktop-commander.plist",
+                *SYSTEM_LAUNCHD_ROOTS]
     # systemd combines user, runtime, generator and vendor unit locations.
     # Its native unit-paths query is the source of truth for this host.
     try:
