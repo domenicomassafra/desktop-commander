@@ -29,7 +29,7 @@ SYSTEM_LAUNCHD_ROOTS = (Path("/Library/LaunchAgents"),
 
 
 def process_references():
-    scan = subprocess.run(["ps", "-axo", "pid=,command="], check=True,
+    scan = subprocess.run(["ps", "-ww", "-axo", "pid=,command="], check=True,
                           capture_output=True, text=True, timeout=12)
     rows = []
     for line in scan.stdout.splitlines():
@@ -61,7 +61,7 @@ def open_file_references():
 
 
 def _process_tree():
-    scan = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], check=True,
+    scan = subprocess.run(["ps", "-ww", "-axo", "pid=,ppid=,command="], check=True,
                           capture_output=True, text=True, timeout=12)
     rows = []
     for line in scan.stdout.splitlines():

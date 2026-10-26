@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 import test_retention
 
+REAL_PROCESS_REFERENCES = test_retention.retention.process_references
+
 
 class NativeConsumerCensusTest(unittest.TestCase):
     setUp = test_retention.ImmutablePromotionTest.setUp
@@ -37,6 +39,69 @@ class NativeConsumerCensusTest(unittest.TestCase):
         self.assertTrue((self.releases / self.names[0]).is_dir())
         query.assert_called_once()
         self.assertEqual(query.call_args.args[0], ["systemd-analyze", "--user", "unit-paths"])
+
+    def test_inactive_unit_external_script_blocks_old_revision(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        unit_dir = self.base.parent / "user-units"
+        unit_dir.mkdir()
+        external_dir = self.base.parent / "external-bin"
+        external_dir.mkdir()
+        script = external_dir / "legacy.sh"
+        script.write_text("#!/bin/sh\nexec node " +
+                          str(self.releases / self.names[0] / "dist/index.js") + "\n")
+        script.chmod(0o755)
+        (unit_dir / "legacy.service").write_text(
+            "[Service]\nExecStart=" + str(script) + "\n")
+        result = test_retention.retention.promote(
+            self.names[2], host="minipc", base=self.base, consumer_paths=[unit_dir])
+        self.assertTrue(any("external-script-reference:legacy.sh" in x
+                            for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_inactive_unit_interpreter_external_script_blocks_old_revision(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        unit_dir = self.base.parent / "user-units"
+        unit_dir.mkdir()
+        external = self.base.parent / "external-helper"
+        external.write_text("node " + str(self.releases / self.names[0] / "dist/index.js"))
+        (unit_dir / "legacy.service").write_text(
+            "[Service]\nExecStart=/bin/sh " + str(external) + "\n")
+        result = test_retention.retention.promote(
+            self.names[2], host="minipc", base=self.base, consumer_paths=[unit_dir])
+        self.assertTrue(any("external-script-reference:external-helper" in x
+                            for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_process_census_requires_wide_argv_to_see_old_revision(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        old = str(self.releases / self.names[0] / "dist/index.js")
+        command = "node --inspect " + "x" * 200 + " " + old
+
+        def fake_ps(args, **kwargs):
+            visible = command if "-ww" in args else command[:80]
+            return subprocess.CompletedProcess(args, 0, "4321 " + visible + "\n", "")
+
+        with patch.object(test_retention.retention, "process_references",
+                          REAL_PROCESS_REFERENCES), \
+             patch.object(test_retention.retention.subprocess, "run", side_effect=fake_ps):
+            result = self.promote(self.names[2])
+        self.assertTrue(any("pid:4321" in x for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_process_tree_requires_wide_argv_for_selected_node(self):
+        selected = self.releases / self.names[1] / "dist/index.js"
+        line = "4242 123 node " + "x" * 200 + " " + str(selected)
+
+        def fake_ps(args, **kwargs):
+            visible = line if "-ww" in args else line[:80]
+            return subprocess.CompletedProcess(args, 0, visible + "\n", "")
+
+        with patch.object(test_retention.retention.subprocess, "run", side_effect=fake_ps):
+            rows = test_retention.retention._process_tree()
+        self.assertIn(str(selected), rows[0][2])
 
     def test_systemd_path_unit_in_shared_directory_blocks_retirement(self):
         self.promote(self.names[0])

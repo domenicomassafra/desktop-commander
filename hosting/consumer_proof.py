@@ -8,6 +8,7 @@ import os
 import plistlib
 from pathlib import Path
 import re
+import shlex
 import stat
 import subprocess
 
@@ -56,6 +57,53 @@ def _references_release(path, release):
         except Exception as exc:
             raise OSError("unreadable-native-plist") from exc
     return False
+
+
+def _external_native_scripts(config, release, roots):
+    """Follow direct script paths in native service definitions outside census roots."""
+    commands = []
+    if config.suffix == ".plist":
+        with config.open("rb") as stream:
+            plist = plistlib.load(stream)
+        for key in ("Program", "ProgramArguments"):
+            value = plist.get(key)
+            if isinstance(value, str):
+                commands.append([value])
+            elif isinstance(value, list) and all(isinstance(item, str) for item in value):
+                commands.append(value)
+    elif config.suffix in {".service", ".conf"}:
+        for line in config.read_text().splitlines():
+            match = re.match(r"\s*Exec(?:Start|StartPre|StartPost|Stop|StopPost|Reload)\s*=\s*(.*)", line)
+            if match:
+                try:
+                    commands.append(shlex.split(match.group(1)))
+                except ValueError as exc:
+                    raise OSError("unparseable-native-exec") from exc
+    script_suffixes = {".sh", ".bash", ".zsh", ".fish", ".py", ".rb", ".pl",
+                       ".js", ".mjs", ".cjs"}
+    interpreters = {"sh", "bash", "zsh", "fish", "python", "python3", "node", "nodejs",
+                    "ruby", "perl"}
+    for argv in commands:
+        interpreter = bool(argv and Path(argv[0]).name in interpreters)
+        for index, argument in enumerate(argv):
+            # Ignore flags and unresolved specifiers; a direct revision path
+            # in these is already caught by the complete config byte scan.
+            candidate = Path(argument.lstrip("-+!@"))
+            if not candidate.is_absolute() or any(
+                    root == candidate or root in candidate.parents for root in roots):
+                continue
+            if not candidate.exists():
+                continue
+            if candidate.is_symlink():
+                raise OSError("external-native-script-symlink")
+            if not candidate.is_file():
+                continue
+            with candidate.open("rb") as stream:
+                shebang = stream.read(2) == b"#!"
+            if (candidate.suffix.lower() in script_suffixes or shebang
+                    or interpreter and index > 0):
+                if _references_release(candidate, release):
+                    yield candidate
 
 
 def obstructions(base, release, consumer_paths, *, process_references, open_file_references):
@@ -211,6 +259,12 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
                             evidence.append("unit-or-config:" + path.name + ":" + name)
                     except OSError:
                         evidence.append("unreadable-native-config:" + path.name)
+                    if path.suffix in {".plist", ".service", ".conf"}:
+                        try:
+                            for script in _external_native_scripts(path, release, folders):
+                                evidence.append("external-script-reference:" + script.name + ":" + name)
+                        except (OSError, UnicodeError, ValueError, TypeError):
+                            evidence.append("unverified-external-native-script:" + path.name)
     for path in consumer_paths:
         try:
             if path.is_file():
