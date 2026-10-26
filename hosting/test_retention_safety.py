@@ -1,6 +1,7 @@
 """Regression tests for native retirement and explicit rollback."""
 import unittest
 from unittest.mock import patch
+from pathlib import Path
 
 import test_retention
 
@@ -31,3 +32,66 @@ class RetentionSafetyTest(unittest.TestCase):
         self.assertEqual((self.base / "rollback").resolve().name, self.names[2])
         self.assertEqual((self.base / "retired").resolve().name, self.names[0])
         self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_extensionless_executable_referencing_old_release_blocks_prune(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        native_bin = self.base / "native-bin"
+        native_bin.mkdir()
+        wrapper = native_bin / "desktop-commander-wrapper"
+        wrapper.write_text("#!/bin/sh\nexec node " + str(self.releases / self.names[0] / "dist/index.js") + "\n")
+        wrapper.chmod(0o755)
+        result = test_retention.retention.promote(
+            self.names[2], host="minipc", base=self.base, consumer_paths=[native_bin])
+        self.assertTrue(any("unit-or-config" in x for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_interrupted_revert_keeps_exact_rollback_after_original_service_returns(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        with patch.object(test_retention.retention, "process_references",
+                          return_value=[(4321, str(self.releases / self.names[0]))]):
+            self.assertTrue(self.promote(self.names[2])["blocked"])
+            point = test_retention.retention._point
+
+            def interrupted(base, label, revision):
+                if label == "current" and revision == self.names[1]:
+                    raise RuntimeError("simulated-interrupted-revert")
+                return point(base, label, revision)
+
+            with patch.object(test_retention.retention, "_point", side_effect=interrupted):
+                with self.assertRaisesRegex(RuntimeError, "simulated-interrupted-revert"):
+                    self.promote(self.names[1])
+            recovered = self.promote(self.names[2])
+        self.assertEqual((self.base / "current").resolve().name, self.names[2])
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[1])
+        self.assertEqual((self.base / "retired").resolve().name, self.names[0])
+        self.assertTrue((self.releases / self.names[1]).is_dir())
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+        self.assertTrue(recovered["blocked"])
+
+    def test_revert_committed_before_journal_cleanup_can_restore_original_service(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        with patch.object(test_retention.retention, "process_references",
+                          return_value=[(4321, str(self.releases / self.names[0]))]):
+            self.promote(self.names[2])
+            journal = self.base / "revert-intent"
+            unlink = Path.unlink
+
+            def interrupt_journal(path, *args, **kwargs):
+                if path == journal:
+                    raise RuntimeError("crash-after-current-revert")
+                return unlink(path, *args, **kwargs)
+
+            with patch.object(Path, "unlink", interrupt_journal):
+                with self.assertRaisesRegex(RuntimeError, "crash-after-current-revert"):
+                    self.promote(self.names[1])
+            self.assertEqual((self.base / "current").resolve().name, self.names[1])
+            self.assertEqual((self.base / "rollback").resolve().name, self.names[2])
+            recovered = self.promote(self.names[2])
+        self.assertTrue(recovered["blocked"])
+        self.assertEqual((self.base / "current").resolve().name, self.names[2])
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[1])
+        self.assertEqual((self.base / "retired").resolve().name, self.names[0])
+        self.assertFalse(journal.exists())

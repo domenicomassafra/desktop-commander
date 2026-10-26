@@ -222,6 +222,36 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
     old = _selector(base, "current", releases)
     previous = _selector(base, "rollback", releases)
     pending = _retired(base, releases, old, previous)
+    # During an explicit revert while an older retirement is still pending,
+    # rollback=B must survive a crash after its selector is overwritten by C.
+    # Keep the original healthy B in an atomic journal until current=B is set.
+    intent = _selector(base, "revert-intent", releases)
+    if intent:
+        if not pending or old is None:
+            raise RuntimeError("orphan-revert-intent")
+        if old == intent and previous != intent:
+            # The revert committed; only the journal cleanup was interrupted.
+            (base / "revert-intent").unlink()
+            intent = None
+        elif previous == intent and old != intent:
+            # Journal published before the first selector change.
+            if revision not in (old, intent):
+                raise RuntimeError("revert-intent-conflict")
+            if revision == old:
+                (base / "revert-intent").unlink()
+                intent = None
+        elif previous == old and old != intent:
+            # Rollback was replaced, but current was never committed.
+            if revision == old:
+                _point(base, "rollback", intent)
+                (base / "revert-intent").unlink()
+                previous, intent = intent, None
+            elif revision == intent:
+                previous = intent  # Complete the same explicit revert.
+            else:
+                raise RuntimeError("revert-intent-conflict")
+        else:
+            raise RuntimeError("invalid-revert-intent")
     if pending and old == revision and previous in (old, pending):
         # B is still active after a failed B->C activation. Restore the exact
         # prior healthy rollback A before clearing the retirement intent.
@@ -254,9 +284,14 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
     if old != revision:
         if retiring and not pending:
             _point(base, "retired", retiring)
+        if pending and revision == previous and not intent:
+            _point(base, "revert-intent", revision)
+            intent = revision
         if old is not None:
             _point(base, "rollback", old)
         _point(base, "current", revision)
+        if intent:
+            (base / "revert-intent").unlink()
     keep = {revision}
     rollback = old if old and old != revision else previous
     if rollback:

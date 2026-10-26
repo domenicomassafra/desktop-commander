@@ -12,6 +12,20 @@ import subprocess
 from release_manifest import verify as verify_release_manifest
 
 
+def _references_release(path, release):
+    """Read native scripts and executable binaries without loading them into RAM."""
+    signature = re.compile(rb"(?<!\w)releases/" + release.name.encode()
+                           + rb"(?![a-f0-9])")
+    tail = b""
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            data = tail + block
+            if str(release).encode() in data or signature.search(data):
+                return True
+            tail = data[-(len(str(release)) + 48):]
+    return False
+
+
 def obstructions(base, release, consumer_paths, *, process_references, open_file_references):
     name = release.name
     evidence = []
@@ -124,20 +138,19 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
                         # os.walk intentionally does not follow link directories.
                         # An unvisited alias may contain a hidden consumer.
                         evidence.append("unscanned-symlink-directory:" + path.name)
-                if path.is_file() and path.suffix in native_suffixes:
+                # Native bin wrappers frequently have no suffix. Their argv
+                # may reference a historical SHA even while they are idle.
+                if path.is_file() and (path.suffix in native_suffixes
+                                       or os.access(path, os.X_OK)):
                     try:
-                        data = path.read_text(errors="replace")
-                        if str(release) in data or re.search(
-                                r"(?<!\w)releases/" + re.escape(name) + r"(?![a-f0-9])", data):
+                        if _references_release(path, release):
                             evidence.append("unit-or-config:" + path.name + ":" + name)
                     except OSError:
                         evidence.append("unreadable-native-config:" + path.name)
     for path in consumer_paths:
         try:
             if path.is_file():
-                data = path.read_text(errors="replace")
-                if str(release) in data or re.search(
-                        r"(?<!\w)releases/" + re.escape(name) + r"(?![a-f0-9])", data):
+                if _references_release(path, release):
                     evidence.append("unit-or-config:" + path.name + ":" + name)
         except OSError:
             evidence.append("unreadable-consumer:" + path.name)
