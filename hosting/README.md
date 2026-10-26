@@ -73,7 +73,7 @@ binari Linux su macOS. Conservare dist/, package.json, vendor/, node_modules/
 e hosting/ in ~/.local/opt/desktop-commander/releases/<SHA>/.
 Installare hosting/gateway/package.json nel runtime gateway/ del MiniPC.
 
-Prima della prima attivazione di **ogni nuova SHA**, assemblare `dist/`,
+Prima della prima attivazione di **ogni nuova SHA**, preparare `dist/`,
 `node_modules/`, `hosting/`, `vendor/` e `package.json` in una directory di
 release appena costruita da sorgente revisionato, quindi sigillare il payload
 ancora pulito usando `python3 hosting/release_manifest.py --seal
@@ -81,7 +81,7 @@ ancora pulito usando `python3 hosting/release_manifest.py --seal
 nomi e digest SHA-256 dell'intero build; non sigillare mai a posteriori una
 release già usata come runtime (potrebbe contenere dati privati sconosciuti).
 Una release storica priva di manifest può restare come rollback ma non è
-idonea alla rimozione automatica. Il comando di build e sigillo opera prima
+idonea alla rimozione automatica. La procedura di build e sigillo opera prima
 dell'installer configurazione; test/build attraverso la guardia risorse.
 
 Scaricare la release ufficiale tunnel-client corrente e verificarne il digest
