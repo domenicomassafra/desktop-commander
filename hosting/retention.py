@@ -177,6 +177,21 @@ def _point(base, label, release):
     temporary.replace(link)
 
 
+def _discard_abandoned_temporary(base, label, expected=None):
+    """Discard only our own atomic symlink, after the original service is healthy."""
+    temporary = base / ("." + label + ".new")
+    if not temporary.exists() and not temporary.is_symlink():
+        return
+    if not temporary.is_symlink():
+        raise RuntimeError("pending-selector-update:" + label)
+    target = temporary.readlink()
+    if (len(target.parts) != 2 or target.parts[0] != "releases"
+            or not REVISION.fullmatch(target.parts[1])
+            or (expected is not None and target.parts[1] != expected)):
+        raise RuntimeError("foreign-pending-selector:" + label)
+    temporary.unlink()
+
+
 def _retired(base, releases, selected, rollback):
     """Recover a completed removal whose retired marker was not yet cleared."""
     try:
@@ -242,6 +257,8 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
         elif previous == old and old != intent:
             # Rollback was replaced, but current was never committed.
             if revision == old:
+                _discard_abandoned_temporary(base, "current", intent)
+                _discard_abandoned_temporary(base, "rollback", old)
                 _point(base, "rollback", intent)
                 (base / "revert-intent").unlink()
                 previous, intent = intent, None
@@ -270,8 +287,15 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
         # before publishing current=B. Do not mistake A for an old rollback
         # eligible for retirement while A is still the current release.
         if old == revision:
-            raise RuntimeError("invalid-duplicate-rollback")
+            # First A->B activation was abandoned after publishing rollback=A.
+            # A is healthy again, but there is no earlier healthy rollback.
+            (base / "rollback").unlink()
         previous = None
+    if old == revision and not intent:
+        # Finalizing the original, still-healthy service cancels incomplete
+        # writes from the activation that did not become current.
+        _discard_abandoned_temporary(base, "current")
+        _discard_abandoned_temporary(base, "rollback")
     if old is None and previous:
         raise RuntimeError("orphan-rollback")
     if (pending and old != revision and previous not in (pending, old)

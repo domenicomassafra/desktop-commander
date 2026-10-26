@@ -112,7 +112,8 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
         other != folder and other in folder.parents for other in folders)}
     native_suffixes = {".plist", ".json", ".service", ".conf", ".socket",
                        ".timer", ".target", ".yaml", ".yml", ".toml",
-                       ".sh", ".bash", ".zsh", ".fish", ".py", ".rb", ".pl"}
+                       ".sh", ".bash", ".zsh", ".fish", ".py", ".rb", ".pl",
+                       ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"}
     for folder in folders:
         if not folder.is_dir():
             continue

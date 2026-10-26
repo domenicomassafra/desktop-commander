@@ -61,6 +61,75 @@ class RetentionSafetyTest(unittest.TestCase):
         self.assertTrue(any("unit-or-config:legacy.sh" in x for x in result["blocked"]), result)
         self.assertTrue((self.releases / self.names[0]).is_dir())
 
+    def test_nonexecutable_node_script_referencing_old_release_blocks_prune(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        scripts = self.base / "hosting"
+        scripts.mkdir()
+        entry = scripts / "legacy.mjs"
+        entry.write_text("const old = '" + str(self.releases / self.names[0]) + "';\n")
+        entry.chmod(0o644)
+        unit = self.base / "old-node.service"
+        unit.write_text("ExecStart=node " + str(entry))
+        result = test_retention.retention.promote(
+            self.names[2], host="minipc", base=self.base, consumer_paths=[unit])
+        self.assertTrue(any("unit-or-config:legacy.mjs" in x for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_first_promotion_abandonment_restores_no_rollback(self):
+        self.promote(self.names[0])
+        point = test_retention.retention._point
+
+        def interrupted(base, label, revision):
+            if label == "current" and revision == self.names[1]:
+                raise RuntimeError("first-promotion-interrupted")
+            return point(base, label, revision)
+
+        with patch.object(test_retention.retention, "_point", side_effect=interrupted):
+            with self.assertRaisesRegex(RuntimeError, "first-promotion-interrupted"):
+                self.promote(self.names[1])
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[0])
+        self.promote(self.names[0])
+        self.assertEqual((self.base / "current").resolve().name, self.names[0])
+        self.assertFalse((self.base / "rollback").exists())
+
+    def test_cancelled_first_promotion_discards_pending_rollback_symlink(self):
+        self.promote(self.names[0])
+        real_replace = Path.replace
+
+        def interrupted_replace(path, target):
+            if path == self.base / ".rollback.new":
+                raise RuntimeError("interrupted-first-rollback-rename")
+            return real_replace(path, target)
+
+        with patch.object(Path, "replace", interrupted_replace):
+            with self.assertRaisesRegex(RuntimeError, "interrupted-first-rollback-rename"):
+                self.promote(self.names[1])
+        self.assertTrue((self.base / ".rollback.new").is_symlink())
+        self.promote(self.names[0])
+        self.assertFalse((self.base / ".rollback.new").exists())
+        self.assertFalse((self.base / "rollback").exists())
+
+    def test_cancelled_revert_discards_exact_pending_current_selector(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        self.promote(self.names[2])
+        real_replace = Path.replace
+
+        def interrupted_replace(path, target):
+            if path == self.base / ".current.new":
+                raise RuntimeError("interrupted-current-rename")
+            return real_replace(path, target)
+
+        with patch.object(Path, "replace", interrupted_replace):
+            with self.assertRaisesRegex(RuntimeError, "interrupted-current-rename"):
+                self.promote(self.names[1])
+        self.assertTrue((self.base / ".current.new").is_symlink())
+        self.promote(self.names[2])  # Original C returned healthy.
+        self.assertFalse((self.base / ".current.new").exists())
+        self.assertEqual((self.base / "current").resolve().name, self.names[2])
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[1])
+
     def test_interrupted_plain_revert_restores_rollback_without_pending_retirement(self):
         self.promote(self.names[0])
         self.promote(self.names[1])
