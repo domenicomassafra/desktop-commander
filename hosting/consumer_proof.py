@@ -133,7 +133,9 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
     folders = {folder for folder in folders if not any(
         other != folder and other in folder.parents for other in folders)}
     native_suffixes = {".plist", ".json", ".service", ".conf", ".socket",
-                       ".timer", ".target", ".yaml", ".yml", ".toml",
+                       ".timer", ".target", ".path", ".mount", ".automount",
+                       ".swap", ".slice", ".scope", ".device", ".busname",
+                       ".yaml", ".yml", ".toml",
                        ".sh", ".bash", ".zsh", ".fish", ".py", ".rb", ".pl",
                        ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"}
     for folder in folders:
@@ -168,7 +170,8 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
                 if path.is_file() and (path.suffix in native_suffixes
                                        or os.access(path, os.X_OK)
                                        or native_bin in path.parents
-                                       or base in path.parents):
+                                       or base in path.parents
+                                       or "systemd" in path.parts):
                     try:
                         if _references_release(path, release):
                             evidence.append("unit-or-config:" + path.name + ":" + name)

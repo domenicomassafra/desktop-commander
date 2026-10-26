@@ -36,6 +36,20 @@ class NativeConsumerCensusTest(unittest.TestCase):
         query.assert_called_once()
         self.assertEqual(query.call_args.args[0], ["systemd-analyze", "--user", "unit-paths"])
 
+    def test_systemd_path_unit_in_shared_directory_blocks_retirement(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        unit_dir = self.base.parent / "systemd" / "user"
+        unit_dir.mkdir(parents=True)
+        (unit_dir / "legacy.path").write_text(
+            "[Path]\nPathExists=" + str(self.releases / self.names[0] / "dist/index.js") + "\n")
+        found = subprocess.CompletedProcess([], 0, str(unit_dir) + "\n", "")
+        with patch.object(test_retention.retention.subprocess, "run", return_value=found):
+            result = test_retention.retention.promote(
+                self.names[2], host="minipc", base=self.base)
+        self.assertTrue(any("unit-or-config:legacy.path" in x for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
     def test_unavailable_systemd_unit_census_never_deletes_history(self):
         self.promote(self.names[0])
         self.promote(self.names[1])
