@@ -112,5 +112,14 @@ if __name__ == '__main__':
     parser.add_argument('host', choices=['studio', 'minipc'])
     parser.add_argument('--release', required=True)
     parser.add_argument('--network-trace', action='store_true', help='Node native net diagnostics; no HTTP payload logging')
+    parser.add_argument('--finalize', action='store_true', help='After restart and native health, publish current/rollback and safely retire previous')
     args = parser.parse_args()
+    if args.finalize:
+        from retention import BASE, promote
+        candidate = Path(args.release).resolve(strict=True)
+        if candidate.parent != (BASE / 'releases').resolve(strict=True):
+            parser.error('--finalize requires a release inside the installed releases root')
+        result = promote(candidate.name, host=args.host)
+        print(json.dumps(result, sort_keys=True))
+        raise SystemExit(2 if result['blocked'] else 0)
     print(configure(args.host, args.release, args.network_trace))

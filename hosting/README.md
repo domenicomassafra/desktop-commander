@@ -86,6 +86,26 @@ secret env DESKTOP_COMMANDER_API_TOKEN -- python3 hosting/install.py studio --re
 secret env DESKTOP_COMMANDER_API_TOKEN COMPUTER_MCP_OPENAI_RUNTIME_KEY -- python3 hosting/install.py minipc --release <release>
 ```
 
+After projecting a verified revision, restart the corresponding LaunchAgent
+(Studio) or user service (MiniPC). Once the service is running and the exact
+revision is visible in the live process and native health probe, finalize:
+
+```sh
+python3 hosting/install.py studio --release "$HOME/.local/opt/desktop-commander/releases/<SHA>" --finalize
+python3 hosting/install.py minipc --release "$HOME/.local/opt/desktop-commander/releases/<SHA>" --finalize
+```
+
+The finalize operation uses no secrets: it checks launchctl/systemd, the
+selected config, the live immutable process and (on MiniPC) tunnel readyz.
+It publishes `current` and `rollback` symlinks to exact SHA revisions, then
+removes only a previously healthy, reproducible, unused rollback. A busy PID,
+open file, other symlink, service reference, unreadable scan or uncertain
+revision is reported in `blocked` (exit code 2); no private data, staging
+or backups are deleted. A blocked removal is tracked by the `retired`
+selector and retried by repeating `--finalize` after the consumer exits.
+If only one revision is installed, `rollback` is deliberately absent until
+a second healthy activation. Do not use `--finalize` before service restart.
+
 COMPUTER_MCP_OPENAI_RUNTIME_KEY è una runtime key OpenAI dedicata con Tunnels
 Read + Use. Proviene dal catalogo age; non è il vecchio token Cloudflare
 CHATGPT_COMPUTER_MCP_TUNNEL_TOKEN. Il writer proietta openai-runtime-key 0600
