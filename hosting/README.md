@@ -61,28 +61,15 @@ NODE_DEBUG=net è diagnostica connessioni senza payload HTTP; disattivarla
 fuori dalla finestra di accettazione. Non è un firewall per bloccare comandi
 espliciti dell'owner.
 
-## Build e proiezione
+## Installazione ufficiale e proiezione
 
-Build e test solo sul MiniPC sotto workload_launcher.py build. Il precedente
-npm ci ha superato il budget della guardia: Bun 1.4.2 ha installato lo stesso
-albero; bun.lock è temporaneo, non sostituisce package-lock.json upstream.
-sh hosting/build.sh usa declaration=false per evitare TS2742 dei .d.ts nel
-layout Bun. Nessuna modifica ai sorgenti upstream. Per Studio preparare sul
-MiniPC bun install --ignore-scripts --os=darwin --cpu=arm64. Non copiare
-binari Linux su macOS. Conservare dist/, package.json, vendor/, node_modules/
-e hosting/ in ~/.local/opt/desktop-commander/releases/<SHA>/.
-Installare hosting/gateway/package.json nel runtime gateway/ del MiniPC.
-
-Prima della prima attivazione di **ogni nuova SHA**, preparare `dist/`,
-`node_modules/`, `hosting/`, `vendor/` e `package.json` in una directory di
-release appena costruita da sorgente revisionato, quindi sigillare il payload
-ancora pulito usando `python3 hosting/release_manifest.py --seal
-"$HOME/.local/opt/desktop-commander/releases/<SHA>"`. Il manifest contiene
-nomi e digest SHA-256 dell'intero build; non sigillare mai a posteriori una
-release già usata come runtime (potrebbe contenere dati privati sconosciuti).
-Una release storica priva di manifest può restare come rollback ma non è
-idonea alla rimozione automatica. La procedura di build e sigillo opera prima
-dell'installer configurazione; test/build attraverso la guardia risorse.
+Usare il pacchetto npm ufficiale `@wonderwhy-er/desktop-commander@0.3.1`
+(MIT, pubblicato il 22 ottobre 2026). Su **ciascun host**, con la guardia
+risorse, eseguire `sh hosting/install-upstream.sh`. Il package resta
+fissato in `~/.local/opt/desktop-commander/upstream-0.3.1/` e viene
+installato per l'OS locale. Il servizio attivo cambia solo dopo la
+proiezione con `hosting/install.py` e il riavvio nativo. Nessun gestore
+di promozione, pruning o rollback personalizzato.
 
 Scaricare la release ufficiale tunnel-client corrente e verificarne il digest
 GitHub prima dell'estrazione; conservare LICENSE/NOTICE/SPDX. Il writer usa
@@ -93,44 +80,13 @@ il client globale di altri servizi. Leggere sempre help quickstart/init/doctor.
 Proiettare esclusivamente dal writer:
 
 ```sh
-secret env DESKTOP_COMMANDER_API_TOKEN -- python3 hosting/install.py studio --release <release>
-secret env DESKTOP_COMMANDER_API_TOKEN COMPUTER_MCP_OPENAI_RUNTIME_KEY -- python3 hosting/install.py minipc --release <release>
+release="$HOME/.local/opt/desktop-commander/upstream-0.3.1/node_modules/@wonderwhy-er/desktop-commander"
+secret env DESKTOP_COMMANDER_API_TOKEN -- python3 hosting/install.py studio --release "$release"
+secret env DESKTOP_COMMANDER_API_TOKEN COMPUTER_MCP_OPENAI_RUNTIME_KEY -- python3 hosting/install.py minipc --release "$release"
 ```
 
-After projecting a verified revision, restart the corresponding LaunchAgent
-(Studio) or user service (MiniPC). Once the service is running and the exact
-revision is visible in the live process and native health probe, finalize:
-
-```sh
-python3 hosting/install.py studio --release "$HOME/.local/opt/desktop-commander/releases/<SHA>" --finalize
-python3 hosting/install.py minipc --release "$HOME/.local/opt/desktop-commander/releases/<SHA>" --finalize
-```
-
-The finalize operation uses no secrets: it checks launchctl/systemd, the
-selected config, the live Node child of the actual service, and an MCP
-initialize/tools/list probe (private HTTP on Studio; native stdio on MiniPC).
-On MiniPC it also checks the tunnel readyz and its MCP health endpoint.
-It publishes `current` and `rollback` symlinks to exact SHA revisions, then
-removes only a previously healthy, manifest-verified, unused rollback under
-an exclusive host-local lock shared with the configurator. A busy PID,
-open file, incomplete `lsof` output, other symlink, native unit/drop-in,
-service reference, modified release payload, unreadable scan or uncertain
-revision is reported in `blocked` (exit code 2); no private data, staging
-or backups are deleted. A blocked removal is tracked by the `retired`
-selector and retried by repeating `--finalize` after the consumer exits.
-La cancellazione richiede visibilità completa dei file aperti. Il processo
-owner può delegare **solo la lettura** a `sudo -n /usr/sbin/lsof` su Studio
-o `sudo -n /usr/bin/lsof` su Linux, senza prompt né eseguire installazione,
-selettori o controlli dei servizi con identità root. Se il privilegio limitato
-non è configurato, la procedura blocca la rimozione con
-`open-file-scan-unavailable`, conservando ogni versione. Nessuna modifica
-automatica a sudoers. Se resta una directory parzialmente cancellata, il retry
-restituisce `incomplete-retirement` e preserva tutti i residui.
-Recoverable interrupted selector writes and already-finished removal markers
-are handled idempotently. If the installed prior revision predates sealing,
-retain it as a verified rollback and block eventual deletion pending proof.
-If only one revision is installed, `rollback` is deliberately absent until
-a second healthy activation. Do not use `--finalize` before service restart.
+Verificare MCP `initialize`, `tools/list` e `start_process(hostname)`
+dopo il riavvio di launchd (Studio) e systemd user (MiniPC).
 
 COMPUTER_MCP_OPENAI_RUNTIME_KEY è una runtime key OpenAI dedicata con Tunnels
 Read + Use. Proviene dal catalogo age; non è il vecchio token Cloudflare
