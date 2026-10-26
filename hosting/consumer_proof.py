@@ -95,7 +95,14 @@ def _external_native_scripts(config, release, roots):
             if not candidate.exists():
                 continue
             if candidate.is_symlink():
-                raise OSError("external-native-script-symlink")
+                # /bin/sh and other system interpreters are commonly symlinks
+                # on Linux; do not mistake a binary interpreter for a script.
+                target = candidate.resolve(strict=True)
+                if target == release or release in target.parents:
+                    yield candidate
+                    continue
+                if candidate.name not in interpreters:
+                    raise OSError("external-native-script-symlink")
             if not candidate.is_file():
                 continue
             with candidate.open("rb") as stream:

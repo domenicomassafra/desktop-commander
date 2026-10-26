@@ -74,6 +74,24 @@ class NativeConsumerCensusTest(unittest.TestCase):
                             for x in result["blocked"]), result)
         self.assertTrue((self.releases / self.names[0]).is_dir())
 
+    def test_system_interpreter_symlink_does_not_block_clean_retirement(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        unit_dir = self.base.parent / "user-units"
+        unit_dir.mkdir()
+        bin_dir = self.base.parent / "system-bin"
+        bin_dir.mkdir()
+        shell = bin_dir / "sh"
+        actual = bin_dir / "dash"
+        actual.write_bytes(b"\x7fELF\x00")
+        shell.symlink_to(actual)
+        (unit_dir / "legacy.service").write_text(
+            "[Service]\nExecStart=" + str(shell) + " --version\n")
+        result = test_retention.retention.promote(
+            self.names[2], host="minipc", base=self.base, consumer_paths=[unit_dir])
+        self.assertEqual(result["blocked"], [], result)
+        self.assertEqual(result["removed"], [self.names[0]])
+
     def test_process_census_requires_wide_argv_to_see_old_revision(self):
         self.promote(self.names[0])
         self.promote(self.names[1])
