@@ -216,6 +216,9 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
     selected = releases / revision
     if selected.is_symlink() or not (selected / "dist/index.js").is_file():
         raise RuntimeError("missing-immutable-release:" + revision)
+    # Check the selected native consumer before any recovery can repoint the
+    # previous rollback or clear an interrupted retirement marker.
+    runtime_health(host, selected, Path.home())
     old = _selector(base, "current", releases)
     previous = _selector(base, "rollback", releases)
     pending = _retired(base, releases, old, previous)
@@ -247,8 +250,6 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
     # A rollback can itself become selected during an explicit revert. Such a
     # release must never be marked retired, even transiently.
     retiring = pending or (previous if old != revision and previous != revision else None)
-    # Health is proven before mutating a selector or touching a release.
-    runtime_health(host, selected, Path.home())
     if old != revision:
         if retiring and not pending:
             _point(base, "retired", retiring)
