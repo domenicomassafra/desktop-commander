@@ -196,13 +196,22 @@ class ImmutablePromotionTest(unittest.TestCase):
     def test_nonprivileged_lsof_cannot_prove_global_open_file_visibility(self):
         self.promote(self.names[0])
         self.promote(self.names[1])
-        scan = subprocess.CompletedProcess([], 0, "p4321\nn/unrelated/file\n", "")
-        with patch.object(retention.subprocess, "run", return_value=scan), \
+        failed = subprocess.CalledProcessError(1, ["sudo", "-n", "lsof"])
+        with patch.object(retention.subprocess, "run", side_effect=failed), \
              patch.object(retention.os, "geteuid", return_value=501), \
              patch.object(retention, "open_file_references", REAL_OPEN_FILE_REFERENCES):
             result = self.promote(self.names[2])
-        self.assertTrue(any("incomplete-lsof-scan" in reason for reason in result["blocked"]))
+        self.assertTrue(any("open-file-scan-unavailable" in reason for reason in result["blocked"]))
         self.assertTrue((self.releases / self.names[0]).exists())
+
+    def test_nonprivileged_file_scan_delegates_only_lsof_to_privileged_reader(self):
+        scan = subprocess.CompletedProcess([], 0, "p4321\nn/unrelated/file\n", "")
+        with patch.object(retention.os, "geteuid", return_value=501), \
+             patch.object(retention.subprocess, "run", return_value=scan) as run:
+            self.assertEqual(REAL_OPEN_FILE_REFERENCES(), ["/unrelated/file"])
+        command = run.call_args.args[0]
+        self.assertEqual(command[0:2], ["/usr/bin/sudo", "-n"])
+        self.assertTrue(command[2].endswith("/lsof"))
 
     def test_systemd_home_specifier_blocks_old_revision(self):
         self.promote(self.names[0])
@@ -224,6 +233,42 @@ class ImmutablePromotionTest(unittest.TestCase):
         result = self.promote(self.names[2])
         self.assertTrue(any("symlink:legacy" in reason for reason in result["blocked"]))
         self.assertTrue((self.releases / self.names[0]).exists())
+
+    def test_nested_symlink_directory_outside_declared_root_blocks_pruning(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        outside = self.base.parent / "consumer-config"
+        outside.mkdir()
+        (outside / "legacy").symlink_to(self.releases / self.names[0])
+        (self.base / "consumers").symlink_to(outside, target_is_directory=True)
+        result = self.promote(self.names[2])
+        self.assertTrue(any("unscanned-symlink-directory:consumers" in reason
+                            for reason in result["blocked"]))
+        self.assertTrue((self.releases / self.names[0]).exists())
+
+    def test_resume_rollback_after_aborted_activation_preserves_exact_previous(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        original = retention._point
+
+        def interrupted(base, label, release):
+            if label == "current":
+                raise RuntimeError("crashed-before-publishing-C")
+            original(base, label, release)
+
+        with patch.object(retention, "_point", side_effect=interrupted):
+            with self.assertRaisesRegex(RuntimeError, "crashed-before-publishing-C"):
+                self.promote(self.names[2])
+        self.assertEqual((self.base / "current").resolve().name, self.names[1])
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[1])
+        self.assertEqual((self.base / "retired").resolve().name, self.names[0])
+        result = self.promote(self.names[1])  # C was unhealthy; restore B.
+        self.assertIn("unproven-history:" + self.names[2], result["blocked"])
+        self.assertEqual(result["removed"], [])
+        self.assertEqual((self.base / "current").resolve().name, self.names[1])
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[0])
+        self.assertFalse((self.base / "retired").is_symlink())
+        self.assertTrue((self.releases / self.names[0]).is_dir())
 
     def test_partial_retired_tree_never_vanishes_from_retry_accounting(self):
         self.promote(self.names[0])

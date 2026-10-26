@@ -118,10 +118,13 @@ service reference, modified release payload, unreadable scan or uncertain
 revision is reported in `blocked` (exit code 2); no private data, staging
 or backups are deleted. A blocked removal is tracked by the `retired`
 selector and retried by repeating `--finalize` after the consumer exits.
-La cancellazione richiede visibilità completa dei file aperti: una
-esecuzione senza privilegi di root conserva il vecchio albero e segnala
-`incomplete-lsof-scan:privileged-visibility-required`, senza tentare
-elevazione. Se resta una directory parzialmente cancellata, il retry
+La cancellazione richiede visibilità completa dei file aperti. Il processo
+owner può delegare **solo la lettura** a `sudo -n /usr/sbin/lsof` su Studio
+o `sudo -n /usr/bin/lsof` su Linux, senza prompt né eseguire installazione,
+selettori o controlli dei servizi con identità root. Se il privilegio limitato
+non è configurato, la procedura blocca la rimozione con
+`open-file-scan-unavailable`, conservando ogni versione. Nessuna modifica
+automatica a sudoers. Se resta una directory parzialmente cancellata, il retry
 restituisce `incomplete-retirement` e preserva tutti i residui.
 Recoverable interrupted selector writes and already-finished removal markers
 are handled idempotently. If the installed prior revision predates sealing,
