@@ -16,11 +16,17 @@ def _references_release(path, release):
     """Read native scripts and executable binaries without loading them into RAM."""
     signature = re.compile(rb"(?<!\w)releases/" + release.name.encode()
                            + rb"(?![a-f0-9])")
+    # Relative imports can contain only the SHA directory segment, e.g.
+    # ../../<revision>/dist/index.js. Treat any isolated full revision as a
+    # possible consumer dependency and keep the old release conservatively.
+    relative_signature = re.compile(rb"(?<![a-f0-9])" + release.name.encode()
+                                    + rb"(?![a-f0-9])")
     tail = b""
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             data = tail + block
-            if str(release).encode() in data or signature.search(data):
+            if (str(release).encode() in data or signature.search(data)
+                    or relative_signature.search(data)):
                 return True
             tail = data[-(len(str(release)) + 48):]
     return False

@@ -171,6 +171,19 @@ class RetentionSafetyTest(unittest.TestCase):
         self.assertTrue((self.releases / self.names[0]).is_dir())
         self.assertEqual((self.base / "rollback").resolve().name, self.names[1])
 
+    def test_relative_import_from_live_rollback_blocks_retiring_release(self):
+        rollback = self.releases / self.names[1]
+        (rollback / ".retention-manifest.json").unlink()
+        helper = rollback / "hosting" / "helper.mjs"
+        helper.parent.mkdir()
+        helper.write_text("import '../../" + self.names[0] + "/dist/index.js';\n")
+        seal(rollback)
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        result = self.promote(self.names[2])
+        self.assertTrue(any("live-release-reference" in reason for reason in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).exists())
+
     def test_external_file_symlink_in_live_rollback_blocks_retirement(self):
         rollback = self.releases / self.names[1]
         (rollback / ".retention-manifest.json").unlink()
