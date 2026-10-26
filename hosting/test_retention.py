@@ -193,6 +193,58 @@ class ImmutablePromotionTest(unittest.TestCase):
         self.assertTrue(any("incomplete-lsof-scan" in reason for reason in result["blocked"]))
         self.assertTrue((self.releases / self.names[0]).exists())
 
+    def test_nonprivileged_lsof_cannot_prove_global_open_file_visibility(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        scan = subprocess.CompletedProcess([], 0, "p4321\nn/unrelated/file\n", "")
+        with patch.object(retention.subprocess, "run", return_value=scan), \
+             patch.object(retention.os, "geteuid", return_value=501), \
+             patch.object(retention, "open_file_references", REAL_OPEN_FILE_REFERENCES):
+            result = self.promote(self.names[2])
+        self.assertTrue(any("incomplete-lsof-scan" in reason for reason in result["blocked"]))
+        self.assertTrue((self.releases / self.names[0]).exists())
+
+    def test_systemd_home_specifier_blocks_old_revision(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        unit = self.base / "other.service"
+        unit.write_text("ExecStart=node %h/.local/opt/desktop-commander/releases/"
+                        + self.names[0] + "/dist/index.js")
+        result = retention.promote(self.names[2], host="minipc", base=self.base,
+                                   consumer_paths=[unit])
+        self.assertTrue(any("unit-or-config" in reason for reason in result["blocked"]))
+        self.assertTrue((self.releases / self.names[0]).exists())
+
+    def test_nested_base_consumer_symlink_blocks_old_revision(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        consumer = self.base / "consumers" / "legacy"
+        consumer.parent.mkdir()
+        consumer.symlink_to(self.releases / self.names[0])
+        result = self.promote(self.names[2])
+        self.assertTrue(any("symlink:legacy" in reason for reason in result["blocked"]))
+        self.assertTrue((self.releases / self.names[0]).exists())
+
+    def test_partial_retired_tree_never_vanishes_from_retry_accounting(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        original = retention.shutil.rmtree
+        obsolete = self.releases / self.names[0]
+
+        def partial_removal(path):
+            if path == obsolete:
+                (path / "dist/index.js").unlink()
+                raise RuntimeError("simulated-incomplete-prune")
+            return original(path)
+
+        with patch.object(retention.shutil, "rmtree", side_effect=partial_removal):
+            with self.assertRaisesRegex(RuntimeError, "simulated-incomplete-prune"):
+                self.promote(self.names[2])
+        result = self.promote(self.names[2])
+        self.assertTrue(any("incomplete-retirement" in reason for reason in result["blocked"]))
+        self.assertTrue(obsolete.exists())
+        self.assertTrue((self.base / "retired").is_symlink())
+
     def test_other_native_unit_dropin_referencing_old_release_blocks_prune(self):
         self.promote(self.names[0])
         self.promote(self.names[1])

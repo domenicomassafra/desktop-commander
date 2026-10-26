@@ -40,6 +40,9 @@ def process_references():
 def open_file_references():
     # lsof uses file descriptors rather than executable command arguments.
     # Fail closed if the host cannot prove that old files are unused.
+    # Non-root lsof cannot certify descriptors held by another account.
+    if os.geteuid() != 0:
+        raise RuntimeError("incomplete-lsof-scan:privileged-visibility-required")
     scan = subprocess.run(["lsof", "-n", "-P", "-F", "n"], check=True,
                           capture_output=True, text=True, timeout=25)
     if scan.stderr.strip():
@@ -241,30 +244,25 @@ def _obstructions(base, release, consumer_paths):
     # Scan native consumer directories including other units and drop-ins, not
     # only today's known service filename. Keep the release tree out of the
     # consumer scan; its complete content is checked against its build seal.
-    folders = {base, base / "hosting", base.parent.parent / "bin"}
+    folders = {base, base.parent.parent / "bin"}
     folders.update(path if path.is_dir() else path.parent for path in consumer_paths)
+    folders = {folder for folder in folders if not any(
+        other != folder and other in folder.parents for other in folders)}
     native_suffixes = {".plist", ".json", ".service", ".conf", ".socket",
                        ".timer", ".target", ".yaml", ".yml", ".toml"}
     for folder in folders:
         if not folder.is_dir():
             continue
-        scan = [folder]
-        if folder != base:
-            for current, directories, _ in os.walk(
-                    folder, followlinks=False,
-                    onerror=lambda exc: evidence.append("unreadable-native-config:" + name)):
-                if len(Path(current).relative_to(folder).parts) >= 5:
-                    directories.clear()
-                scan.append(Path(current))
-        for current in set(scan):
-            try:
-                entries = list(current.iterdir())
-            except OSError:
-                evidence.append("unreadable-native-config:" + name)
-                continue
-            for path in entries:
-                if current == base and path.name == "releases":
-                    continue
+        if folder.is_symlink():
+            evidence.append("unverified-native-root:" + folder.name)
+            continue
+        for current, directories, files in os.walk(
+                folder, followlinks=False,
+                onerror=lambda exc: evidence.append("unreadable-native-config:" + name)):
+            if Path(current) == base:
+                directories[:] = [item for item in directories if item != "releases"]
+            for filename in directories + files:
+                path = Path(current) / filename
                 if path == base / "retired":
                     continue  # Managed pending-retirement marker.
                 if path.is_symlink():
@@ -277,14 +275,19 @@ def _obstructions(base, release, consumer_paths):
                         evidence.append("symlink:" + path.name + ":" + name)
                 if path.is_file() and path.suffix in native_suffixes:
                     try:
-                        if str(release) in path.read_text(errors="replace"):
+                        data = path.read_text(errors="replace")
+                        if str(release) in data or re.search(
+                                r"(?<!\w)releases/" + re.escape(name) + r"(?![a-f0-9])", data):
                             evidence.append("unit-or-config:" + path.name + ":" + name)
                     except OSError:
                         evidence.append("unreadable-native-config:" + path.name)
     for path in consumer_paths:
         try:
-            if path.is_file() and str(release) in path.read_text(errors="replace"):
-                evidence.append("unit-or-config:" + path.name + ":" + name)
+            if path.is_file():
+                data = path.read_text(errors="replace")
+                if str(release) in data or re.search(
+                        r"(?<!\w)releases/" + re.escape(name) + r"(?![a-f0-9])", data):
+                    evidence.append("unit-or-config:" + path.name + ":" + name)
         except OSError:
             evidence.append("unreadable-consumer:" + path.name)
     return evidence
@@ -336,6 +339,9 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
                  else consumer_paths)
     candidates = []
     blockers = []
+    if pending and (releases / pending).is_dir() and not (
+            releases / pending / "dist/index.js").is_file():
+        blockers.append("incomplete-retirement:" + pending)
     for path in releases.iterdir():
         if path.is_symlink():
             blockers.append("uncertain-revision:" + path.name)
