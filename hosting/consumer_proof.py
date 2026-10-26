@@ -5,12 +5,27 @@ retention coordinator so test seams match the public promotion operation.
 """
 import json
 import os
+import plistlib
 from pathlib import Path
 import re
 import stat
 import subprocess
 
 from release_manifest import verify as verify_release_manifest
+
+
+def _decoded_plist_references(value, release):
+    """Inspect logical plist strings; binary and UTF-16 plists hide ASCII SHA bytes."""
+    if isinstance(value, str):
+        return (str(release) in value or re.search(
+            r"(?<![a-f0-9])" + re.escape(release.name) + r"(?![a-f0-9])", value) is not None)
+    if isinstance(value, dict):
+        return any(_decoded_plist_references(key, release) or
+                   _decoded_plist_references(item, release)
+                   for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(_decoded_plist_references(item, release) for item in value)
+    return False
 
 
 def _references_release(path, release):
@@ -30,6 +45,16 @@ def _references_release(path, release):
                     or relative_signature.search(data)):
                 return True
             tail = data[-(len(str(release)) + 48):]
+    if path.suffix.lower() == ".plist":
+        # Reading the raw bytes does not identify UTF-16 strings in a native
+        # binary or XML plist. Parse native structures and fail closed on errors.
+        try:
+            if path.stat().st_size > 8 * 1024 * 1024:
+                raise OSError("oversized-native-plist")
+            with path.open("rb") as stream:
+                return _decoded_plist_references(plistlib.load(stream), release)
+        except Exception as exc:
+            raise OSError("unreadable-native-plist") from exc
     return False
 
 

@@ -77,6 +77,51 @@ class NativeConsumerCensusTest(unittest.TestCase):
         self.assertTrue(any("unit-or-config:legacy.plist" in x for x in result["blocked"]), result)
         self.assertTrue((self.releases / self.names[0]).is_dir())
 
+    def test_utf16_xml_launchdaemon_blocks_retirement(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        root = self.base.parent / "Library" / "LaunchDaemons"
+        root.mkdir(parents=True)
+        payload = plistlib.dumps({
+            "ProgramArguments": ["node", str(self.releases / self.names[0] / "dist/index.js")],
+        }).decode("utf-8").replace('encoding="UTF-8"', 'encoding="UTF-16"').encode("utf-16")
+        self.assertNotIn(self.names[0].encode(), payload)
+        (root / "legacy-utf16.plist").write_bytes(payload)
+        with patch.object(test_retention.retention, "SYSTEM_LAUNCHD_ROOTS", (root,)):
+            result = test_retention.retention.promote(
+                self.names[2], host="studio", base=self.base)
+        self.assertTrue(any("unit-or-config:legacy-utf16.plist" in x for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_binary_unicode_launchagent_blocks_retirement(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        root = self.base.parent / "Library" / "LaunchAgents"
+        root.mkdir(parents=True)
+        payload = plistlib.dumps({
+            "ProgramArguments": ["node", "café " + str(self.releases / self.names[0] / "dist/index.js")],
+        }, fmt=plistlib.FMT_BINARY)
+        self.assertNotIn(self.names[0].encode(), payload)
+        (root / "legacy-binary.plist").write_bytes(payload)
+        with patch.object(test_retention.retention, "SYSTEM_LAUNCHD_ROOTS", (root,)):
+            result = test_retention.retention.promote(
+                self.names[2], host="studio", base=self.base)
+        self.assertTrue(any("unit-or-config:legacy-binary.plist" in x for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_malformed_native_plist_blocks_retirement(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        root = self.base.parent / "Library" / "LaunchDaemons"
+        root.mkdir(parents=True)
+        (root / "unknown.plist").write_bytes(b"bplist00broken")
+        with patch.object(test_retention.retention, "SYSTEM_LAUNCHD_ROOTS", (root,)):
+            result = test_retention.retention.promote(
+                self.names[2], host="studio", base=self.base)
+        self.assertTrue(any("unreadable-native-config:unknown.plist" in x
+                            for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
     def test_unreadable_system_launchd_root_blocks_retirement(self):
         self.promote(self.names[0])
         self.promote(self.names[1])

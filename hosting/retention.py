@@ -363,7 +363,7 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
                     or release.is_symlink() or release.name in keep):
                 blockers.append("unsafe-remove-target:" + release.name)
                 break
-            identity = release.stat(follow_symlinks=False)
+            identity = release.lstat()
             if (_selector(base, "current", releases) != revision
                     or _selector(base, "rollback", releases) != rollback
                     or _selector(base, "retired", releases) != release.name):
@@ -379,7 +379,7 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
                 blockers.extend(fresh)
                 break
             if (release.is_symlink() or
-                    release.stat(follow_symlinks=False) != identity):
+                    release.lstat() != identity):
                 blockers.append("changed-release-before-prune:" + release.name)
                 break
             shutil.rmtree(release)
