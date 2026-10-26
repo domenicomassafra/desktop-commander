@@ -46,6 +46,40 @@ class RetentionSafetyTest(unittest.TestCase):
         self.assertTrue(any("unit-or-config" in x for x in result["blocked"]), result)
         self.assertTrue((self.releases / self.names[0]).is_dir())
 
+    def test_nonexecutable_interpreter_script_referencing_old_release_blocks_prune(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        native_bin = self.base / "native-bin"
+        native_bin.mkdir()
+        script = native_bin / "legacy.sh"
+        script.write_text("#!/bin/sh\nnode " + str(self.releases / self.names[0] / "dist/index.js") + "\n")
+        script.chmod(0o644)  # systemd may use ExecStart=/bin/sh /path/legacy.sh
+        unit = self.base / "other.service"
+        unit.write_text("ExecStart=/bin/sh " + str(script))
+        result = test_retention.retention.promote(
+            self.names[2], host="minipc", base=self.base, consumer_paths=[native_bin, unit])
+        self.assertTrue(any("unit-or-config:legacy.sh" in x for x in result["blocked"]), result)
+        self.assertTrue((self.releases / self.names[0]).is_dir())
+
+    def test_interrupted_plain_revert_restores_rollback_without_pending_retirement(self):
+        self.promote(self.names[0])
+        self.promote(self.names[1])
+        self.promote(self.names[2])  # A retired, leaving exactly C and B.
+        point = test_retention.retention._point
+
+        def interrupted(base, label, revision):
+            if label == "current" and revision == self.names[1]:
+                raise RuntimeError("simulated-plain-revert-interruption")
+            return point(base, label, revision)
+
+        with patch.object(test_retention.retention, "_point", side_effect=interrupted):
+            with self.assertRaisesRegex(RuntimeError, "simulated-plain-revert-interruption"):
+                self.promote(self.names[1])
+        self.promote(self.names[2])  # Original C service returned healthy.
+        self.assertEqual((self.base / "current").resolve().name, self.names[2])
+        self.assertEqual((self.base / "rollback").resolve().name, self.names[1])
+        self.assertEqual(sorted(x.name for x in self.releases.iterdir()), self.names[1:])
+
     def test_interrupted_revert_keeps_exact_rollback_after_original_service_returns(self):
         self.promote(self.names[0])
         self.promote(self.names[1])

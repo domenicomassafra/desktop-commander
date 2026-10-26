@@ -105,12 +105,14 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
     # Scan native consumer directories including other units and drop-ins, not
     # only today's known service filename. Keep the release tree out of the
     # consumer scan; its complete content is checked against its build seal.
-    folders = {base, base.parent.parent / "bin"}
+    native_bin = base.parent.parent / "bin"
+    folders = {base, native_bin}
     folders.update(path if path.is_dir() else path.parent for path in consumer_paths)
     folders = {folder for folder in folders if not any(
         other != folder and other in folder.parents for other in folders)}
     native_suffixes = {".plist", ".json", ".service", ".conf", ".socket",
-                       ".timer", ".target", ".yaml", ".yml", ".toml"}
+                       ".timer", ".target", ".yaml", ".yml", ".toml",
+                       ".sh", ".bash", ".zsh", ".fish", ".py", ".rb", ".pl"}
     for folder in folders:
         if not folder.is_dir():
             continue
@@ -141,7 +143,8 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
                 # Native bin wrappers frequently have no suffix. Their argv
                 # may reference a historical SHA even while they are idle.
                 if path.is_file() and (path.suffix in native_suffixes
-                                       or os.access(path, os.X_OK)):
+                                       or os.access(path, os.X_OK)
+                                       or native_bin in path.parents):
                     try:
                         if _references_release(path, release):
                             evidence.append("unit-or-config:" + path.name + ":" + name)

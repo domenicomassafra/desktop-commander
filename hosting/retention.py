@@ -222,12 +222,11 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
     old = _selector(base, "current", releases)
     previous = _selector(base, "rollback", releases)
     pending = _retired(base, releases, old, previous)
-    # During an explicit revert while an older retirement is still pending,
-    # rollback=B must survive a crash after its selector is overwritten by C.
-    # Keep the original healthy B in an atomic journal until current=B is set.
+    # During any explicit revert, rollback=B must survive a crash after its
+    # selector is overwritten by C. Keep B in an atomic journal until current=B.
     intent = _selector(base, "revert-intent", releases)
     if intent:
-        if not pending or old is None:
+        if old is None:
             raise RuntimeError("orphan-revert-intent")
         if old == intent and previous != intent:
             # The revert committed; only the journal cleanup was interrupted.
@@ -284,7 +283,7 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
     if old != revision:
         if retiring and not pending:
             _point(base, "retired", retiring)
-        if pending and revision == previous and not intent:
+        if old is not None and revision == previous and not intent:
             _point(base, "revert-intent", revision)
             intent = revision
         if old is not None:
