@@ -61,6 +61,33 @@ def obstructions(base, release, consumer_paths, *, process_references, open_file
     except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
         detail = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
         evidence.append("open-file-scan-unavailable:" + detail)
+    # The live current/rollback trees may still load dependencies by symlink
+    # even when no process holds an open descriptor during this scan.
+    live_roots = set()
+    for selector in (base / "current", base / "rollback"):
+        if selector.is_symlink():
+            try:
+                live_roots.add(selector.resolve(strict=True))
+            except (OSError, RuntimeError):
+                evidence.append("unresolved-live-selector:" + selector.name)
+    retired_root = release.resolve(strict=True)
+    for live in live_roots - {retired_root}:
+        for folder, directories, files in os.walk(
+                live, followlinks=False,
+                onerror=lambda exc: evidence.append("unreadable-live-release:" + live.name)):
+            for filename in directories + files:
+                path = Path(folder) / filename
+                if not path.is_symlink():
+                    continue
+                try:
+                    target = path.resolve(strict=True)
+                except (OSError, RuntimeError):
+                    evidence.append("unresolved-live-symlink:" + path.name)
+                    continue
+                if target == retired_root or retired_root in target.parents:
+                    evidence.append("live-release-symlink:" + path.name + ":" + name)
+                elif path.is_dir() and target != live and live not in target.parents:
+                    evidence.append("unscanned-live-symlink-directory:" + path.name)
     # Scan native consumer directories including other units and drop-ins, not
     # only today's known service filename. Keep the release tree out of the
     # consumer scan; its complete content is checked against its build seal.

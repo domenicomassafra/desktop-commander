@@ -245,7 +245,8 @@ def _promote_locked(revision, *, host, base=BASE, consumer_paths=None):
         previous = None
     if old is None and previous:
         raise RuntimeError("orphan-rollback")
-    if pending and old != revision and previous not in (pending, old):
+    if (pending and old != revision and previous not in (pending, old)
+            and revision != previous):
         raise RuntimeError("retirement-pending:" + pending)
     # A rollback can itself become selected during an explicit revert. Such a
     # release must never be marked retired, even transiently.
