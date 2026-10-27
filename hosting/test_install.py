@@ -58,7 +58,9 @@ class ProjectionTest(unittest.TestCase):
         self.assertEqual((installer.CONFIG / 'openai-runtime-key').read_text(), 'test-only-runtime')
         self.assertEqual((installer.CONFIG / 'openai-runtime-key').stat().st_mode & 0o777, 0o600)
         self.assertIn('tunnel-client run --profile computer-mcp', unit.read_text())
+        self.assertIn('tunnel-client-0.0.18/tunnel-client run', unit.read_text())
         command = run.call_args.args[0]
+        self.assertIn('tunnel-client-0.0.18/tunnel-client', command[0])
         self.assertIn('sample_mcp_stdio_local', command)
         self.assertIn('file:' + str(installer.CONFIG / 'openai-runtime-key'), command)
         self.assertNotIn('test-only-runtime', str(command))
@@ -66,10 +68,11 @@ class ProjectionTest(unittest.TestCase):
 
     def test_studio_uses_native_gateway_and_sandbox(self):
         installer.BASE.mkdir()
-        (installer.BASE / 'supergateway').write_text('')
+        (installer.BASE / 'supergateway-4.2.1').write_text('')
         path = installer.configure('studio', self.release)
         plist = plistlib.loads(path.read_bytes())
         self.assertEqual(plist['ProgramArguments'][0], '/usr/bin/sandbox-exec')
+        self.assertIn('supergateway-4.2.1', plist['ProgramArguments'][3])
         self.assertIn('--apiKeyFile', plist['ProgramArguments'])
         self.assertNotIn('test-only-token', str(plist))
         self.assertEqual((installer.CONFIG / 'studio-api-key').stat().st_mode & 0o777, 0o600)
