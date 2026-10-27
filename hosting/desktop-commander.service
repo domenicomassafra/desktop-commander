@@ -1,5 +1,5 @@
 [Unit]
-Description=Desktop Commander private OpenAI MCP tunnel
+Description=Desktop Commander MCP for ChatGPT remote file and process tools
 After=network-online.target
 
 [Service]

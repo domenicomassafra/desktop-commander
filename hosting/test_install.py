@@ -40,6 +40,7 @@ class ProjectionTest(unittest.TestCase):
         self.assertEqual(child['DESKTOP_COMMANDER_DISABLE_TELEMETRY'], '1')
         self.assertTrue(child['DC_FLAG_URL'].startswith('data:'))
         self.assertIn('NoNewPrivileges=yes', unit.read_text())
+        self.assertIn('ChatGPT remote file and process tools', unit.read_text())
         for path in [unit, installer.CONFIG / 'mcp.json']:
             self.assertNotIn('test-only-token', path.read_text())
             self.assertNotIn('test-only-password', path.read_text())

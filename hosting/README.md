@@ -39,6 +39,12 @@ nessuna modifica ai binari, conservare licenze e avvisi originali.
 
 ## Topologia privata e invarianti
 
+MCP resta necessario per esporre a ChatGPT la discovery e le chiamate remote
+agli strumenti di file e processi. Una CLI locale non fornisce al Secure MCP
+Tunnel gli schemi degli strumenti né il protocollo richiesto dal connettore.
+La motivazione è riportata anche nella configurazione della unit systemd e
+nel generatore della configurazione dell'hub.
+
 ChatGPT → OpenAI Secure MCP Tunnel → client ufficiale MiniPC → hub stdio →
 Desktop Commander stdio MiniPC oppure Supergateway Studio su
 100.99.195.87:9197/mcp (Tailscale, API key). Studio è elencato per primo.
