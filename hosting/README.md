@@ -61,17 +61,15 @@ NODE_DEBUG=net è diagnostica connessioni senza payload HTTP; disattivarla
 fuori dalla finestra di accettazione. Non è un firewall per bloccare comandi
 espliciti dell'owner.
 
-## Build e proiezione
+## Installazione ufficiale e proiezione
 
-Build e test solo sul MiniPC sotto workload_launcher.py build. Il precedente
-npm ci ha superato il budget della guardia: Bun 1.4.2 ha installato lo stesso
-albero; bun.lock è temporaneo, non sostituisce package-lock.json upstream.
-sh hosting/build.sh usa declaration=false per evitare TS2742 dei .d.ts nel
-layout Bun. Nessuna modifica ai sorgenti upstream. Per Studio preparare sul
-MiniPC bun install --ignore-scripts --os=darwin --cpu=arm64. Non copiare
-binari Linux su macOS. Conservare dist/, package.json, vendor/, node_modules/
-e hosting/ in ~/.local/opt/desktop-commander/releases/<SHA>/.
-Installare hosting/gateway/package.json nel runtime gateway/ del MiniPC.
+Usare il pacchetto npm ufficiale `@wonderwhy-er/desktop-commander@0.3.1`
+(MIT, pubblicato il 22 ottobre 2026). Su **ciascun host**, con la guardia
+risorse, eseguire `sh hosting/install-upstream.sh`. Il package resta
+fissato in `~/.local/opt/desktop-commander/upstream-0.3.1/` e viene
+installato per l'OS locale. Il servizio attivo cambia solo dopo la
+proiezione con `hosting/install.py` e il riavvio nativo. Nessun gestore
+di promozione, pruning o rollback personalizzato.
 
 Scaricare la release ufficiale tunnel-client corrente e verificarne il digest
 GitHub prima dell'estrazione; conservare LICENSE/NOTICE/SPDX. Il writer usa
@@ -82,9 +80,13 @@ il client globale di altri servizi. Leggere sempre help quickstart/init/doctor.
 Proiettare esclusivamente dal writer:
 
 ```sh
-secret env DESKTOP_COMMANDER_API_TOKEN -- python3 hosting/install.py studio --release <release>
-secret env DESKTOP_COMMANDER_API_TOKEN COMPUTER_MCP_OPENAI_RUNTIME_KEY -- python3 hosting/install.py minipc --release <release>
+release="$HOME/.local/opt/desktop-commander/upstream-0.3.1/node_modules/@wonderwhy-er/desktop-commander"
+secret env DESKTOP_COMMANDER_API_TOKEN -- python3 hosting/install.py studio --release "$release"
+secret env DESKTOP_COMMANDER_API_TOKEN COMPUTER_MCP_OPENAI_RUNTIME_KEY -- python3 hosting/install.py minipc --release "$release"
 ```
+
+Verificare MCP `initialize`, `tools/list` e `start_process(hostname)`
+dopo il riavvio di launchd (Studio) e systemd user (MiniPC).
 
 COMPUTER_MCP_OPENAI_RUNTIME_KEY è una runtime key OpenAI dedicata con Tunnels
 Read + Use. Proviene dal catalogo age; non è il vecchio token Cloudflare
