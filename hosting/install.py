@@ -65,7 +65,7 @@ def configure(host, release, network_trace=False):
             'StandardErrorPath': str(STATE / 'studio.stderr.log'),
         }
         path = HOME / 'Library/LaunchAgents' / (label + '.plist')
-        put(path, plistlib.dumps(plist))
+        put(path, plistlib.dumps(plist), 0o644)
         return path
     # MCP is required by ChatGPT's remote file/process tool discovery and calls;
     # the local CLI cannot expose those MCP tools through the Secure MCP Tunnel.

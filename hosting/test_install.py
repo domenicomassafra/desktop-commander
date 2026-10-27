@@ -77,6 +77,7 @@ class ProjectionTest(unittest.TestCase):
         self.assertIn('--apiKeyFile', plist['ProgramArguments'])
         self.assertNotIn('test-only-token', str(plist))
         self.assertEqual((installer.CONFIG / 'studio-api-key').stat().st_mode & 0o777, 0o600)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o644)
 
     def test_missing_build_fails_without_projection(self):
         (self.release / 'dist/index.js').unlink()
