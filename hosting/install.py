@@ -42,7 +42,7 @@ def configure(host, release, network_trace=False):
     if network_trace:
         common['NODE_DEBUG'] = 'net'
     if host == 'studio':
-        gateway = BASE / 'supergateway'
+        gateway = BASE / 'supergateway-4.2.1'
         if not gateway.is_file():
             raise SystemExit('Install the attested Supergateway binary first')
         # Reuse an existing catalog secret, never invent a plaintext secret store.
@@ -89,7 +89,7 @@ def configure(host, release, network_trace=False):
     # Native stdio starts no listener or authorization server. Preserve old OAuth
     # state on disk: it is protected data, not part of the active transport.
     put(CONFIG / 'openai-runtime-key', os.environ['COMPUTER_MCP_OPENAI_RUNTIME_KEY'])
-    subprocess.run([str(BASE / 'tunnel-client-0.0.17/tunnel-client'), 'init',
+    subprocess.run([str(BASE / 'tunnel-client-0.0.18/tunnel-client'), 'init',
         '--sample', 'sample_mcp_stdio_local', '--profile', 'computer-mcp',
         '--profile-dir', str(CONFIG / 'tunnel-profiles'), '--force',
         '--tunnel-id', 'tunnel_6ada9565bc9081918acfcd3dee77b650',

@@ -13,14 +13,15 @@ Riusi, senza server o autenticazione scritti da noi:
 - ni-c/mcp-hub 0.11.6, MIT, e184c4e33de950e0b3f0d66bc8e7161acb905c2b:
   aggregazione **stdio nativa**, nessun listener e nessun authorization server.
   https://mcp-hub.ni-c.de/reference/environment#in-stdio-mode
-- supercorp-ai/supergateway 4.2.0, MIT,
-  2b7504bbb63634f2aeb5083461bd8c9ff0d9a2c8: stdio → HTTP autenticato
+- [supercorp-ai/supergateway 4.2.1](https://github.com/supercorp-ai/supergateway/releases/tag/v4.2.1), MIT,
+  commit a78bd90804d3080e8268961949f22575b34826f0: stdio → HTTP autenticato
   solo su Tailscale Studio. Binario darwin-arm64 verificato con SHA256SUMS
-  e gh attestation verify (exit 0).
-- openai/tunnel-client 0.0.17, Apache-2.0,
-  a248b7f725fc989c1eb26680cf4351ee33421f61. Binario dedicato nel runtime,
+  (`fee4ca40ded90c0429aa64fbc75a819c67828df56a36d8edd8c78712d2f7e698`)
+  e GitHub attestation; installare come `supergateway-4.2.1` con le licenze.
+- [openai/tunnel-client 0.0.18](https://github.com/openai/tunnel-client/releases/tag/v0.0.18), Apache-2.0,
+  commit 274a5588414819f063d27100a4fb1096aae3830f. Binario dedicato nel runtime,
   non sostituisce quello usato da altri servizi. Release linux-amd64.zip
-  SHA256 bd6a57c6c0511644267cafadd13ffdb53ece0d753e0b88857f957e78a8fbc793.
+  SHA256 `3c82307316acd93c88a384b62af1d81d3f4cb0efa975f9c0bfaef922866a04c4`.
   https://github.com/openai/tunnel-client/releases/latest
   https://developers.openai.com/api/docs/guides/secure-mcp-tunnels
   https://github.com/openai/tunnel-client/blob/master/docs/onboarding.md
@@ -73,7 +74,7 @@ di promozione, pruning o rollback personalizzato.
 
 Scaricare la release ufficiale tunnel-client corrente e verificarne il digest
 GitHub prima dell'estrazione; conservare LICENSE/NOTICE/SPDX. Il writer usa
-~/.local/opt/desktop-commander/tunnel-client-0.0.17/tunnel-client. Per un
+~/.local/opt/desktop-commander/tunnel-client-0.0.18/tunnel-client. Per un
 upgrade aggiornare insieme percorso unit/writer e prove: non cambiare
 il client globale di altri servizi. Leggere sempre help quickstart/init/doctor.
 
@@ -107,7 +108,7 @@ Il vecchio backend chatgpt-twohost-mcp resta attivo fino alla prova ChatGPT.
 systemctl --user daemon-reload
 systemctl --user enable --now desktop-commander.service
 # Al redeploy: restart, senza sovrapporre due client dello stesso tunnel.
-~/.local/opt/desktop-commander/tunnel-client-0.0.17/tunnel-client doctor --profile computer-mcp --profile-dir ~/.config/desktop-commander/tunnel-profiles --explain
+~/.local/opt/desktop-commander/tunnel-client-0.0.18/tunnel-client doctor --profile computer-mcp --profile-dir ~/.config/desktop-commander/tunnel-profiles --health.listen-addr 127.0.0.1:0 --explain
 curl -fsS http://127.0.0.1:8498/readyz
 curl -fsS http://127.0.0.1:8498/health/mcp
 python3 -m unittest discover -s hosting -p 'test_*.py' -v

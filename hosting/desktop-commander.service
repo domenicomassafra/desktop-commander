@@ -3,7 +3,7 @@ Description=Desktop Commander private OpenAI MCP tunnel
 After=network-online.target
 
 [Service]
-ExecStart=%h/.local/opt/desktop-commander/tunnel-client-0.0.17/tunnel-client run --profile computer-mcp --profile-dir %h/.config/desktop-commander/tunnel-profiles
+ExecStart=%h/.local/opt/desktop-commander/tunnel-client-0.0.18/tunnel-client run --profile computer-mcp --profile-dir %h/.config/desktop-commander/tunnel-profiles
 Restart=on-failure
 RestartSec=10
 NoNewPrivileges=yes
