@@ -138,3 +138,36 @@ issue #477. La sonda SDK stdio locale non certifica il prodotto ChatGPT.
 Solo dopo queste prove migrare consumer e ritirare backend legacy,
 bridge Studio, tunnel Cloudflare dedicato e sorgente/runbook ControlCenter,
 senza toccare servizi, dati o tunnel Obsidian indipendenti.
+
+
+## Aggiornamento trasporto owner — 31 ottobre 2026
+
+Il pacchetto ufficiale `@wonderwhy-er/desktop-commander` resta fissato
+alla release stabile **0.3.1** su Mac Studio e MiniPC; non ci sono
+release stabili successive alla data di questa verifica. Il fork
+conserva `src/` e `test/` upstream identici all'originale.
+
+Si aggiornano esclusivamente le dipendenze di trasporto sul MiniPC:
+
+- `@ni-c/mcp-hub` **0.11.7**, con versione e albero dipendenze bloccati
+  in `hosting/gateway/package-lock.json`. Installare con `npm ci
+  --ignore-scripts` su una directory distinta prima di attivare il nuovo
+  hub. Include fix di sicurezza di `body-parser` 2.4.0.
+- `openai/tunnel-client` **v0.0.19**, binario ufficiale linux-amd64
+  verificato con `SHA256SUMS.txt`, collocato in
+  `~/.local/opt/desktop-commander/tunnel-client-0.0.19/` con licenze/SPDX.
+  Migliora la recovery dei figli stdio. Non aggiungere i nuovi flag/YAML
+  di failure policy al profilo condiviso: il rollback v0.0.18 deve
+  continuare a leggere la configurazione esistente.
+- `supercorp-ai/supergateway` **4.2.1** resta ultima release stabile e
+  Studio non deve essere riavviato per questo upgrade MiniPC.
+
+Conservare come rollback hub 0.11.6, precedente systemd unit, tunnel
+0.0.18 e profilo. Preflight: `probe.py` su candidato hub 0.11.7 e
+`tunnel-client 0.0.19 doctor`. Cutover sotto lock esclusivo, arrestando
+la sola unit `desktop-commander.service`, sostituendo hub e unit, quindi
+riavviando e verificando `/readyz`, `doctor` e prova MCP 2/2 host.
+In caso di errore ripristinare unit e gateway precedenti e riavviare
+il client 0.0.18. Non ri-eseguire il writer `install.py minipc` nel
+cutover: riscrive il profilo e richiede espliciti secret gate.
+Non cancellare versioni, dati o backup storici.
