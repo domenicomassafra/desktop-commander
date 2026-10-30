@@ -18,6 +18,19 @@ const call = async (server, tool, args) => {
   assert(!result.isError, text(result));
   return text(result);
 };
+// Desktop Commander may finish the command after start_process returns a PID.
+// Follow the process session rather than treating normal async output as failure.
+const waitForCommandOutput = async (server, command, expected) => {
+  let output = await call(server, 'start_process', { command, timeout_ms: 3000 });
+  const match = output.match(/Process started with PID ([1-9][0-9]*)/);
+  const pid = match ? Number(match[1]) : null;
+  for (let attempt = 0; pid && !output.includes(expected) && attempt < 8; attempt++) {
+    output += '\n' + await call(server, 'read_process_output', { pid, timeout_ms: 2000 });
+  }
+  assert(output.includes(expected), output);
+  return output;
+};
+
 try {
   await client.connect(transport);
   // Native stdio initializes before its supervised children finish discovery.
@@ -34,8 +47,7 @@ try {
     ['studio', 'mac-studio-dodo', '/Users/domenico'],
     ['minipc', 'udodo', '/home/udodo'],
   ]) {
-    const output = await call(server, 'start_process', { command: 'hostname', timeout_ms: 3000 });
-    assert(output.includes(expected), output);
+    await waitForCommandOutput(server, 'hostname', expected);
     console.log(server + ': hostname=' + expected + ' PASS');
     const path = home + '/.local/state/desktop-commander/probe-' + randomUUID() + '.txt';
     const marker = 'desktop-commander-477-' + randomUUID();
