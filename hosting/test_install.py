@@ -59,9 +59,9 @@ class ProjectionTest(unittest.TestCase):
         self.assertEqual((installer.CONFIG / 'openai-runtime-key').read_text(), 'test-only-runtime')
         self.assertEqual((installer.CONFIG / 'openai-runtime-key').stat().st_mode & 0o777, 0o600)
         self.assertIn('tunnel-client run --profile computer-mcp', unit.read_text())
-        self.assertIn('tunnel-client-0.0.18/tunnel-client run', unit.read_text())
+        self.assertIn('tunnel-client-0.0.19/tunnel-client run', unit.read_text())
         command = run.call_args.args[0]
-        self.assertIn('tunnel-client-0.0.18/tunnel-client', command[0])
+        self.assertIn('tunnel-client-0.0.19/tunnel-client', command[0])
         self.assertIn('sample_mcp_stdio_local', command)
         self.assertIn('file:' + str(installer.CONFIG / 'openai-runtime-key'), command)
         self.assertNotIn('test-only-runtime', str(command))
@@ -78,6 +78,13 @@ class ProjectionTest(unittest.TestCase):
         self.assertNotIn('test-only-token', str(plist))
         self.assertEqual((installer.CONFIG / 'studio-api-key').stat().st_mode & 0o777, 0o600)
         self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+
+    def test_hub_pinned_version_matches_lockfile(self):
+        gateway = Path(__file__).with_name('gateway')
+        package = json.loads((gateway / 'package.json').read_text())
+        lock = json.loads((gateway / 'package-lock.json').read_text())
+        self.assertEqual(package['dependencies']['@ni-c/mcp-hub'], '0.11.7')
+        self.assertEqual(lock['packages']['node_modules/@ni-c/mcp-hub']['version'], '0.11.7')
 
     def test_missing_build_fails_without_projection(self):
         (self.release / 'dist/index.js').unlink()
