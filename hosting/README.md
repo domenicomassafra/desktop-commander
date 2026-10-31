@@ -79,10 +79,11 @@ proiezione con `hosting/install.py` e il riavvio nativo. Nessun gestore
 di promozione, pruning o rollback personalizzato.
 
 Scaricare la release ufficiale tunnel-client corrente e verificarne il digest
-GitHub prima dell'estrazione; conservare LICENSE/NOTICE/SPDX. Il writer usa
-~/.local/opt/desktop-commander/tunnel-client-0.0.18/tunnel-client. Per un
-upgrade aggiornare insieme percorso unit/writer e prove: non cambiare
-il client globale di altri servizi. Leggere sempre help quickstart/init/doctor.
+GitHub prima dell'estrazione; conservare LICENSE/NOTICE/SPDX. Il writer
+MiniPC usa ~/.local/opt/desktop-commander/tunnel-client-0.0.19/tunnel-client;
+la versione 0.0.18 è conservata solo per rollback. Per un upgrade aggiornare
+insieme percorso unit/writer e prove: non cambiare il client globale di altri
+servizi. Leggere sempre help quickstart/init/doctor.
 
 Proiettare esclusivamente dal writer:
 
@@ -114,7 +115,7 @@ Il vecchio backend chatgpt-twohost-mcp resta attivo fino alla prova ChatGPT.
 systemctl --user daemon-reload
 systemctl --user enable --now desktop-commander.service
 # Al redeploy: restart, senza sovrapporre due client dello stesso tunnel.
-~/.local/opt/desktop-commander/tunnel-client-0.0.18/tunnel-client doctor --profile computer-mcp --profile-dir ~/.config/desktop-commander/tunnel-profiles --health.listen-addr 127.0.0.1:0 --explain
+~/.local/opt/desktop-commander/tunnel-client-0.0.19/tunnel-client doctor --profile computer-mcp --profile-dir ~/.config/desktop-commander/tunnel-profiles --health.listen-addr 127.0.0.1:0 --explain
 curl -fsS http://127.0.0.1:8498/readyz
 curl -fsS http://127.0.0.1:8498/health/mcp
 python3 -m unittest discover -s hosting -p 'test_*.py' -v
